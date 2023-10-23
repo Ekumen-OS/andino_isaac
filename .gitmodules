@@ -1,0 +1,3 @@
+[submodule "submodules/andino"]
+	path = submodules/andino
+	url = https://github.com/Ekumen-OS/andino.git
