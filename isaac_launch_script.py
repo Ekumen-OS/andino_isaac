@@ -4,7 +4,7 @@ from omni.isaac.core.utils.extensions import enable_extension
 from omni.isaac.core.utils.stage import open_stage
 from omni.isaac.core.utils.stage import add_reference_to_stage
 from omni.isaac.core import World
-from omni.isaac.wheeled_robots.robots import WheeledRobot
+from omni.isaac.version import get_version
 
 class SimulationLoader(object):
 	def __init__(self) -> None:
@@ -27,7 +27,8 @@ class SimulationLoader(object):
 		os.environ["RMW_IMPLEMENTATION"] = "rmw_fastrtps_cpp"
 		prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
 		user_home_path = os.path.expanduser("~")
-		os.environ["LD_LIBRARY_PATH"] = prev_ld_library_path + ":" + user_home_path + "/.local/share/ov/pkg/isaac_sim-2023.1.0/exts/omni.isaac.ros2_bridge/humble/lib"
+		isaac_pkg_folder = "isaac_sim-" + get_version()[0]
+		os.environ["LD_LIBRARY_PATH"] = prev_ld_library_path + ":" + user_home_path + "/.local/share/ov/pkg/" + isaac_pkg_folder + "/exts/omni.isaac.ros2_bridge/humble/lib"
 		# Enable ROS2_bridge extension. This must be done before loading Andino given that the action graphs depend on the extension
 		enable_extension("omni.isaac.ros2_bridge")
 
@@ -52,5 +53,3 @@ class SimulationLoader(object):
 if __name__ == '__main__':
 	sim_loader = SimulationLoader()
 	sim_loader.load()
-
-
