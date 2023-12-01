@@ -1,6 +1,4 @@
 import argparse
-import numpy as np
-import os
 import carb
 from omni.isaac.kit import SimulationApp
 
@@ -9,12 +7,9 @@ CONFIG = {"width": 1280, "height": 720, "sync_loads": True, "headless": False, "
 
 # Set up command line arguments
 parser = argparse.ArgumentParser("Simulation loader argument parser")
-parser.add_argument("--world_file", default="plain_world.usda", help="World file name including extension")
-parser.add_argument("--robot_file", default="just_andino.usda", help="Robot file name including extension")
+parser.add_argument("--world_file", default="/home/aeneas/omniverse/andino_ws/src/andino_isaac/isaac_worlds/plain_world.usda", help="Full path to the world file")
+parser.add_argument("--robot_file", default="/home/aeneas/omniverse/andino_ws/src/andino_isaac/andino_isaac_description/just_andino.usda", help="Full path to the robot file")
 args, unknown = parser.parse_known_args()
-cwd = os.getcwd()
-world_file = cwd + "/isaac_worlds/" + args.world_file
-robot_file = cwd + "/andino_isaac_description/" + args.robot_file
 
 # Start the omniverse application
 simulation_app = SimulationApp(launch_config=CONFIG)
@@ -24,14 +19,8 @@ simulation_app = SimulationApp(launch_config=CONFIG)
 from omni.isaac.core import World
 from omni.isaac.core.utils.extensions import enable_extension
 from omni.isaac.core.utils.stage import open_stage, is_stage_loading, add_reference_to_stage
-from omni.isaac.version import get_version
 
 # Enable the ros2_bridge extension. Environment variables must be set
-os.environ["RMW_IMPLEMENTATION"] = "rmw_fastrtps_cpp"
-prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
-user_home_path = os.path.expanduser("~")
-isaac_pkg_folder_name = "isaac_sim-" + get_version()[0]
-os.environ["LD_LIBRARY_PATH"] = prev_ld_library_path + ":" + user_home_path + "/.local/share/ov/pkg/" + isaac_pkg_folder_name + "/exts/omni.isaac.ros2_bridge/humble/lib"
 if not enable_extension("omni.isaac.ros2_bridge"):
 	print("ROS2_BRIDGE extension could not be loaded, aborting startup")
 	simulation_app.close()
@@ -39,7 +28,7 @@ if not enable_extension("omni.isaac.ros2_bridge"):
 # Open world
 try:
 	print("Loading world please wait")
-	open_stage(world_file)
+	open_stage(args.world_file)
 	# Wait two frames so that stage starts loading
 	simulation_app.update()
 	simulation_app.update()
@@ -55,7 +44,7 @@ except ValueError:
 # Load robot
 print("Loading robot")
 try:
-	add_reference_to_stage(usd_path=robot_file, prim_path="/andino")
+	add_reference_to_stage(usd_path=args.robot_file, prim_path="/andino")
 	print("Robot loaded")
 except FileNotFoundError:
 	print("Robot could not be loaded. Check robot file path or load it manually in the simulation")
