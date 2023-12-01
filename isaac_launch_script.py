@@ -1,5 +1,5 @@
 import os
-import sys
+import carb
 from omni.isaac.core.utils.extensions import enable_extension
 from omni.isaac.core.utils.stage import open_stage
 from omni.isaac.core.utils.stage import add_reference_to_stage
@@ -14,25 +14,29 @@ class SimulationLoader(object):
 		return
 
 	def load(self):
-		self.enable_ros2_bridge_extension()
-		self.load_world()
+		# ROS2_BRIDGE extension is critical
+		if not self.enable_ros2_bridge_extension():
+			print ("Unable to load ros2_bridge extension, aborting startup")
+			return
+		# World is critical
+		if not self.load_world():
+			print ("Unable to load world, aborting startup")
+			return
+		# Robot is not critical, do not abort if loading fails
 		self.spawn_robot()
 		#self._world.play()
 
-	def enable_ros2_bridge_extension(self):
+	def enable_ros2_bridge_extension(self) -> bool:
 		"""
-		Method that enables the ROS2_BRIDGE Isaac extension
+		Method to make sure the ROS2_BRIDGE Isaac extension is enabled, aborting execution if it's not
 		"""
-		# Environment variables needed to load the ROS2 bridge
-		os.environ["RMW_IMPLEMENTATION"] = "rmw_fastrtps_cpp"
-		prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
-		user_home_path = os.path.expanduser("~")
-		isaac_pkg_folder = "isaac_sim-" + get_version()[0]
-		os.environ["LD_LIBRARY_PATH"] = prev_ld_library_path + ":" + user_home_path + "/.local/share/ov/pkg/" + isaac_pkg_folder + "/exts/omni.isaac.ros2_bridge/humble/lib"
 		# Enable ROS2_bridge extension. This must be done before loading Andino given that the action graphs depend on the extension
-		enable_extension("omni.isaac.ros2_bridge")
+		if not enable_extension("omni.isaac.ros2_bridge"):
+			print("ROS2_BRIDGE extension could not be loaded, aborting startup")
+			return False
+		return True
 
-	def load_world(self):
+	def load_world(self) -> bool:
 		"""
 		Method to load the specified simulation world
 		"""
@@ -41,13 +45,17 @@ class SimulationLoader(object):
 			self._world = World(**self._world_settings)
 		except ValueError:
 			print("Stage could not be loaded, check file path")
-		return
+			return False
+		return True
 
 	def spawn_robot(self):
 		"""
 		Method to spawn the robot as a reference
 		"""
-		add_reference_to_stage(usd_path="/home/aeneas/omniverse/andino_isaac/andino_isaac_description/andino_isaac.usda", prim_path="/andino")
+		try:
+			add_reference_to_stage(usd_path="/home/aeneas/omniverse/andino_isaac/andino_isaac_description/andino_isaac.usda", prim_path="/andino")
+		except FileNotFoundError:
+			print("Robot could not be loaded. Check robot file path or load it manually in the simulation")
 		return
 
 if __name__ == '__main__':
