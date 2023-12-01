@@ -1,4 +1,5 @@
 import os
+import sys
 from omni.isaac.core.utils.extensions import enable_extension
 from omni.isaac.core.utils.stage import open_stage
 from omni.isaac.core.utils.stage import add_reference_to_stage
@@ -46,7 +47,6 @@ class SimulationLoader(object):
 		Method to spawn the robot as a reference
 		"""
 		add_reference_to_stage(usd_path="/home/aeneas/omniverse/andino_isaac/andino_isaac_description/andino_isaac.usda", prim_path="/andino")
-		self.robot1 = self._world.scene.add(WheeledRobot(prim_path="/andino", name="robot1", position=[0.,0.,0.2]))
 		return
 
 if __name__ == '__main__':
