@@ -19,6 +19,9 @@ class SimulationLoader(object):
 		#self._world.play()
 
 	def enable_ros2_bridge_extension(self):
+		"""
+		Method that enables the ROS2_BRIDGE Isaac extension
+		"""
 		# Environment variables needed to load the ROS2 bridge
 		os.environ["RMW_IMPLEMENTATION"] = "rmw_fastrtps_cpp"
 		prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
@@ -28,21 +31,22 @@ class SimulationLoader(object):
 		enable_extension("omni.isaac.ros2_bridge")
 
 	def load_world(self):
-		print("Loading world")
-		# Opening the stage USD file with the robot
+		"""
+		Method to load the specified simulation world
+		"""
 		try:
 			open_stage("/home/aeneas/omniverse/andino_isaac/isaac_worlds/plain_world.usda")
 			self._world = World(**self._world_settings)
 		except ValueError:
-			print("Stage could not be loaded, check path")
+			print("Stage could not be loaded, check file path")
 		return
 
 	def spawn_robot(self):
-		# Spawn the robot as a payload
-		print("Spawning robot")
+		"""
+		Method to spawn the robot as a reference
+		"""
 		add_reference_to_stage(usd_path="/home/aeneas/omniverse/andino_isaac/andino_isaac_description/andino_isaac.usda", prim_path="/andino")
 		self.robot1 = self._world.scene.add(WheeledRobot(prim_path="/andino", name="robot1", position=[0.,0.,0.2]))
-		# open_stage("/home/aeneas/omniverse/andino_isaac/andino_isaac_description/andino_isaac.usda")
 		return
 
 if __name__ == '__main__':
