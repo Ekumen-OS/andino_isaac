@@ -4,8 +4,7 @@
   <name>andino_isaac</name>
   <version>0.1.0</version>
   <description>The andino_isaac package</description>
-  <author email="franco.c@ekumenlabs.com">Franco Cipollone</author>
-  <maintainer email="franco.c@ekumenlabs.com">Franco Cipollone</maintainer>
+  <maintainer email="juancarosella96@ekumenlabs.com">Juan Carosella</maintainer>
   <license file="LICENSE">BSD Clause 3</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
