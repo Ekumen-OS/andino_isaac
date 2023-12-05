@@ -7,8 +7,8 @@ CONFIG = {"width": 1280, "height": 720, "sync_loads": True, "headless": False, "
 
 # Set up command line arguments
 parser = argparse.ArgumentParser("Simulation loader argument parser")
-parser.add_argument("--world_file", default="/home/aeneas/omniverse/andino_ws/src/andino_isaac/isaac_worlds/plain_world.usda", help="Full path to the world file")
-parser.add_argument("--robot_file", default="/home/aeneas/omniverse/andino_ws/src/andino_isaac/andino_isaac_description/just_andino.usda", help="Full path to the robot file")
+parser.add_argument("--world_file", help="Full path to the world file")
+parser.add_argument("--robot_file", help="Full path to the robot file")
 args, unknown = parser.parse_known_args()
 
 # Start the omniverse application
