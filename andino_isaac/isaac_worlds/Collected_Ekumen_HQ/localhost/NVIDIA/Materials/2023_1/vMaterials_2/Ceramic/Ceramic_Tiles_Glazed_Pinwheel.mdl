@@ -1,0 +1,2593 @@
+/******************************************************************************
+ *    Copyright 2023 NVIDIA Corporation.  All rights reserved.           *
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA’s Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.6;
+import ::base::*;
+import ::state::*;
+import ::math::*;
+import ::anno::*;
+import ::tex::*;
+import ::df::*;
+import ::nvidia::core_definitions::*;
+
+const string COPYRIGHT = 
+" Copyright 2023 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+// Returns the normal n in tangent space, given n is in internal space.
+float3 transform_internal_to_tangent(float3 n)
+[[
+	anno::hidden()
+]]
+{
+	return
+		n.x* float3(state::texture_tangent_u(0).x,state::texture_tangent_v(0).x,state::normal().x)+
+		n.y* float3(state::texture_tangent_u(0).y,state::texture_tangent_v(0).y,state::normal().y)+
+		n.z* float3(state::texture_tangent_u(0).z,state::texture_tangent_v(0).z,state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[
+	anno::hidden()
+]]
+{
+	return  state::texture_tangent_u(0) * n.x +
+			state::texture_tangent_v(0) * n.y +
+			state::normal() * n.z ;
+}
+
+// https://nullprogram.com/blog/2018/07/31/
+//bias: 0.17353355999581582 ( very probably the best of its kind )
+// NOTE: To turn this back to a float, one must divide the value by 4294967296.f 
+// which corresponds to 0xffffffff, however MDL seems to turn this into -1.
+int lowbias32(int x)
+{
+	x ^= x >>> 16;
+	x *= 0x7feb352d;
+	x ^= x >>> 15;
+	x *= 0x846ca68b;
+	x ^= x >>> 16;
+	return x;
+}
+
+float uint2float(int x)
+{
+	return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+float2 rnd22(int2 p, int seed = 0) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + seed + lowbias32(p[1]))) / 4294967296.f
+	);
+    return ret_val;
+}    
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+
+float3 rgb2srgb(float3 val) [[ anno::unused() ]] {
+    return ::math::pow( ::math::max(val, float3(0.f)), float3(1./2.2) );
+}
+
+float3 nonrepeat_lookup(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float2 texture_scale = float2(1.0),
+	float3 average_color = float3(0.5),
+	float patch_size = 8.0,
+	int seed = 0
+)
+{
+	
+	float2 uv_in = float2(uvw.position[0], uvw.position[1]) / texture_scale;
+	float Z =  patch_size;     // patch scale inside example texture
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * uv_in; //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V)); // hexa-tile id
+	//I = int2((I.x), (I.y)); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I, seed))) - m)
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0,1), seed))) - m)
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1,0), seed))) - m);
+	else
+		O = (W[0] =      -F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1), seed)))   - m)
+	      + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1, 0), seed))) - m)
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0, 1), seed))) - m);
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0, 1.0);
+	
+	return float3(O);
+}
+
+::base::texture_coordinate_info transform_coordinate_2(
+	float4x4 transform
+		[[ anno::description("A transformation to be applied to the source coordinates. rotation_translation_scale() is a suggested means to compute the transformation matrix") ]],
+	::base::texture_coordinate_info coordinate = ::base::texture_coordinate_info()
+		[[ anno::description("Coordinate, typically sourced from coordinate_source or coordinate_projection") ]]
+) [[
+	::anno::description("Transform a texture coordinate by a matrix") ,
+	::anno::noinline()
+  ]]
+{
+	float4 r_position = transform * float4(coordinate.position.x,coordinate.position.y,coordinate.position.z,1);
+	float4 u = transform[0];
+	float3 ru = ::math::normalize(float3(u.x,u.y,u.z));
+	float cos =  ru.x;
+	float sin =  -ru.y;
+
+	return ::base::texture_coordinate_info(
+		float3(r_position.x,r_position.y,r_position.z),
+		math::normalize(cos * coordinate.tangent_u - sin * coordinate.tangent_v),
+		math::normalize(cos * coordinate.tangent_v + sin * coordinate.tangent_u));
+}
+
+
+::base::texture_coordinate_info vmat_transform(
+								float2 translation = float2(0.0, 0.0),
+								float rotation	 = 0.0,				// rotation in degrees
+								float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+
+	return transform_coordinate_2(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+
+struct ceramic_tiles_return {
+	color diffuse;
+	float dirt;
+	float tiles_isotropic_rough_squared;
+	float glazing_roughness;
+	float3 normal;
+	float4 randvals;
+	::base::texture_coordinate_info  tiles_uvw;
+};
+
+ceramic_tiles_return Ceramic_Tiles_Glazed_Generator(
+
+	// Ceramic textures
+																			//	   *** MAPS ***
+	// *** Special multimaps for tiles ***									//
+	uniform texture_2d tex_lin_tiles_id_offset_color_tex 						// R - Random ID per tile
+												= texture_2d() [[			// G - Offset (for the tiling algorithm to work)
+		::anno::description("Tiles texture that contains the tile ids," 	// B - Height texture for each tile for compositing the grout
+		" the offsets and the rotation for the tiles"),
+		::anno::display_name("Tiles ID Offset Rotation Texture"),
+		::anno::in_group("Textures"),
+		::anno::ui_order(0)
+	]],
+	uniform texture_2d tex_tiles_multi_R_noise1_G_noise2_B_craquelure		// R - Diffuse color mix noise 1
+												= texture_2d() [[			// G - finish_roughness
+		::anno::description("Tiles texture that contains the textures "		// B - Craquelure
+		"for diffuse color mixing, the roughness and the craquelure "),
+		::anno::display_name("Tiles Noise1 Roughness Craquelure"),
+		::anno::in_group("Textures"),
+		::anno::ui_order(1)
+	]],
+	uniform texture_2d tex_tiles_multi_R_rough_G_thickness_B_drops 		// R - Diffuse color mix noise 2
+												= texture_2d()[[			// G - Glazing Thickness
+		::anno::description("Tiles texture that contains the textures "		// B - Drops (roughness)
+		"for diffuse color mixing, glazing thickness and drops"),
+		::anno::display_name("Tiles Noise2 Thickness Drops"),
+		::anno::in_group("Textures"),
+		::anno::ui_order(2)
+	]],
+
+	uniform texture_2d tex_tiles_multi_R_height_G_edgefade_B_ao				// R - Height
+												= texture_2d() [[			// B - AO
+		::anno::description("Tiles texture that contains the textures "		// G - Edgefade (diffuse)
+		"for the tiles height, the edge fade and AO"),
+		::anno::display_name("Tiles Height Edgefade AO"),
+		::anno::in_group("Textures"),
+		::anno::ui_order(3)
+	]],
+
+	uniform texture_2d tex_lin_tiles_norm = texture_2d()					// Normal texture for the tiles
+	[[
+		::anno::description("The normal texture to be used for the ceramic tiles"),
+		::anno::display_name("Tiles Normal"),
+		::anno::in_group("Textures"),
+		::anno::ui_order(4)
+	]],
+	// uniform texture_2d tex_lin_orange_peel_norm = texture_2d(),			// Orange Peel Texture
+
+	// Grout
+	uniform texture_2d tex_srgb_grout_diffuse_tex = texture_2d() 			// Diffuse Grout texture
+	[[
+		::anno::description("The diffuse texture for the grout"),
+		::anno::display_name("Grout Diffuse"),
+		::anno::in_group("Textures"),
+		::anno::ui_order(5)
+	]],
+	uniform texture_2d tex_lin_grout_normal = texture_2d()	 			// texture with normal for the grout
+	[[
+		::anno::description("The normal texture for the grout"),
+		::anno::display_name("Grout Normal"),
+		::anno::in_group("Textures"),
+		::anno::ui_order(6)
+	]],
+
+	// OTHER TEXTURE REQUIRED
+	// OPTIONAL: Diffuse texture for the ceramix underneath the glazing. Probably not very visible
+
+	color tiles_color_1					= color(0.6f)
+	[[
+		::anno::description("Mixing color 1 for the ceramic tiles"),
+		::anno::display_name("Tiles Color 1"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(7)
+	]],
+	color tiles_color_2					= color(0.7f)
+	[[
+		::anno::description("Mixing color 2 for the ceramic tiles"),
+		::anno::display_name("Tiles Color 2"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(8)
+	]],
+	color tiles_color_3					= color(0.8f)
+	[[
+		::anno::description("Mixing color 3 for the tiles"),
+		::anno::display_name("Tiles Color 3"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(9)
+	]],
+	color tiles_color_diamond					= color(0.246201f, 0.434154f, 0.479320f)
+	[[
+		::anno::description("Color for the diamond"),
+		::anno::display_name("Diamond Color"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(10)
+	]],
+	float tiles_diamond_texture_amount		= 0.0f
+	[[
+		::anno::description("The amount of dark texture to be applied to the diamond"),
+		::anno::display_name("Diamond Texture Amount"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(11)
+	]],
+	float tiles_random_brightness		= 0.0f
+	[[
+		::anno::description("Randomly modifies the brightness of the tiles"),
+		::anno::display_name("Tiles Random Brightness"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(12)
+	]],
+	int tiles_random_seed				= 0
+	[[
+		::anno::description("Choose a different seed number to obtain a different randomization pattern"),
+		::anno::display_name("Tiles Random Seed"),
+		::anno::in_group("Tiles"),
+		::anno::ui_order(13)
+	]],
+
+	uniform float tiles_bump_strength	= 1.0f
+	[[
+		::anno::description("Adjusts the strength of the tiles bump map"),
+		::anno::display_name("Tiles Bump Strength"),
+		::anno::in_group("Tiles"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::ui_order(14)
+	]],
+	float tiles_random_slope_orientation = 0.03f
+	[[
+		::anno::description("When increasing this value, tiles are slanted in random directions. "
+		"This breaks up the even look and gives the appearance that the tiles work was done by hand"),
+		::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::hard_range(0.0f, 5.0f),
+		::anno::in_group("Tiles"),
+		::anno::ui_order(15)
+	]],
+
+	float tiles_rotate		  		= 0.0f								// global rotation of texture in the tiles
+	[[
+		::anno::description("Global rotation of the texture lookup for the tiles textures in degrees"),
+		::anno::display_name("Tiles Texture Rotate"),
+		::anno::soft_range(-360.0f, 360.0f),
+		::anno::in_group("Tiles"),
+		::anno::ui_order(16)
+	]],
+	float tiles_random_rotation 		= 1.0f								// random rotation amount in degrees
+	[[
+		::anno::description("Random rotation of the textures for the tiles in degrees"),
+		::anno::display_name("Tiles Random Rotation"),
+		::anno::soft_range(0.0f, 360.0f),
+		::anno::in_group("Tiles"),
+		::anno::ui_order(17)
+	]],
+	float tiles_scale		   		= 1.0f
+	[[
+		::anno::description("Scales the texture in the tiles"),
+		::anno::display_name("Tiles Texture Scale"),
+		::anno::in_group("Tiles"),
+		::anno::soft_range(0.0f, 2.0f),
+		::anno::ui_order(18)
+	]],
+	float tiles_random_scale			= 0.0f
+	[[
+		::anno::description("Adds random variation to the scaling of the texture lookup for the tiles"),
+		::anno::display_name("Tiles Random Texture Scale"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::in_group("Tiles"),
+		::anno::ui_order(19)
+	]],
+
+	float glazing_varying_thickness_weight = 0.0f
+	[[
+		::anno::description("Adds a varying thickness to the glazing which makes the underlying "
+		"ceramic color shine through"),
+		::anno::display_name("Glazing Varying Thickness Weight"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Glazing"),
+		::anno::ui_order(20)
+	]],
+	float glazing_edgefade_weight		= 0.0f
+	[[
+		::anno::description("Adds a fading effect so that the glazing is thinner at the edges "
+		"of the tiles. This revelas the ceramic color which will begin to shine through."),
+		::anno::display_name("Glazing Edgefade Weight"),
+		::anno::in_group("Glazing"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::ui_order(21)
+	]],
+	float glazing_edgefade_randomness	= 0.0f
+	[[
+		::anno::description("Adds Randomness to the edgefade effect, so that tiles have varying edgefading effect."),
+		::anno::display_name("Glazing Edgefade Randomness"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(22)
+	]],
+	float glazing_craquelure_weight		= 0.0f
+	[[
+		::anno::description("Adds craquelure to the tiles to give them a more antique appearance"),
+		::anno::display_name("Glazing Craquelure Weight"),
+		::anno::in_group("Glazing"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::ui_order(23)
+	]],
+	uniform float glazing_orange_peel_bump		= 1.0f
+	[[
+		::anno::description("Adds an unevenness to the glazing so that it appears more natural"),
+		::anno::display_name("Glazing Orange Peel Bump"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::hard_range(0.0f, 3.0f),
+		::anno::in_group("Glazing"),
+		::anno::ui_order(24)
+	]],
+	uniform float glazing_orangepeel_size		= 1.0f
+	[[
+		::anno::description("Adjusts the size of the orangepeel on the glazing"),
+		::anno::display_name("Glazing Orange Peel Size"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::in_group("Glazing"),
+		::anno::ui_order(25)
+	]],
+	uniform int glazing_orangepeel_noise_levels	= 3
+	[[
+		::anno::description("A higher number of levels makes the glazing layer to appear noisier "
+		"while a low level gives the glazing a realtively smooth appearance"),
+		::anno::display_name("Glazing Orange Peel Noise Levels"),
+		::anno::hard_range(0, 6),
+		::anno::in_group("Glazing"),
+		::anno::ui_order(26)
+	]],
+	uniform float3 glazing_orangepeel_distortion = float3(0.0f)
+	[[
+		::anno::description("An optional input to add distortion to the glazing orange peel"),
+		::anno::display_name("Glazing Orange Peel Distortion"),
+		::anno::in_group("Glazing"),
+		::anno::ui_order(27)
+	]],
+
+	// Roughness
+	float tiles_roughness			= 0.04f
+	[[
+		::anno::description("The basic roughness of the tiles"),
+		::anno::display_name("Tiles Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(28)
+	]],
+	float tiles_roughness_range		= 0.5f
+	[[
+		::anno::description("The amount how much the roughness is varying around its base roughness value"),
+		::anno::display_name("Tiles Roughness Range"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(29)
+	]],
+	float drops_amount				= 0.5f
+	[[
+		::anno::description("Adds residue of dried drops on the tiles which can be seen in the specular highlight"),
+		::anno::display_name("Drops Amount"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(30)
+	]],
+	float grout_brightness			= 0.5f
+	[[
+		::anno::description("Adjusts the brightness of the grout"),
+		::anno::display_name("Grout Brightness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(31)
+	]],
+	float grout_roughness			= 0.8f
+	[[
+		::anno::description("The roughness of the grout"),
+		::anno::display_name("Grout Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(32)
+	]],
+
+	float grout_height					= 0.1f
+	[[
+		::anno::description("The height of the grout"),
+		::anno::display_name("Grout Height"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(33)
+	]],
+	float grout_softness				= 0.1f
+	[[
+		::anno::description("The softness of the transition between the grout and the tiles"),
+		::anno::display_name("Grout Transition Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(34)
+	]],
+	uniform float grout_bump_strength	= 1.0f
+	[[
+		::anno::description("The strength of the grout bumpmap"),
+		::anno::display_name("Grout Bump Strength"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(35)
+	]],
+	uniform float grout_scale	= 1.0f
+	[[
+		::anno::description("Scales the texture lookup for the grout independently from the tiles"),
+		::anno::display_name("Grout Scale"),
+		::anno::in_group("Appearance"),
+		::anno::soft_range(0.f, 2.f)
+	]],
+	float ao_amount						= 0.5f
+	[[
+		::anno::description("The amount of ambient occlusion to convey more depth of grout. Used for artistical tweaking"),
+		::anno::display_name("Ambient Occlusion Amount"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture"),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform")
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotation angle of the texture in degrees"),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(-360.f, 360.f)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size"),
+		::anno::display_name("Texture Scale"),
+		::nvidia::core_definitions::dimension(float2(1.0, 1.0)),
+		::anno::in_group("Transform")
+	]],
+	uniform int uv_space_index   		= 0
+	[[
+		::anno::description("The UV texture space to be used"),
+		::anno::display_name("Texture Space"),
+		::anno::in_group("Advanced"),
+		::anno::ui_order(10)
+	]]
+)
+[[
+	::anno::description("Glazed Ceramic Tiles generator. This function should be hidden as it has all of its "
+	"parameters exposed. Expose in the material that it is generated with just the parameters that are needed "
+	"for easy tweaking"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Ceramic Tiles Generator"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Glazed_Pinwheel.png"),
+	::anno::key_words(string[]("generator", "tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture")),
+	::anno::hidden(),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]]
+{
+	texture_scale *= 0.5;
+	color ceramic_color = color(1.0f);
+	::base::texture_coordinate_info base_uv = vmat_transform(
+					translation:texture_translate,
+					rotation: 	texture_rotate ,
+					scaling: 	texture_scale ,
+					system:		::base::texture_coordinate_uvw,
+					uv_space:	uv_space_index
+				);
+	::base::texture_coordinate_info grout_uv = ::base::texture_coordinate_info(
+		position:	base_uv.position / grout_scale,
+		tangent_u:	base_uv.tangent_u,
+		tangent_v:	base_uv.tangent_v
+			
+	);
+	
+// --------------------------- Rand Tiles Routine -------------------------------------------------------
+
+	// rand_tiles_return rand_tiles_ret = rand_tiles(
+		// tex_lin_tiles_id_offset_color_tex:	tex_lin_tiles_id_offset_color_tex,
+		// base_uv:			base_uv,
+		// texture_space:			uv_space_index,
+		// scale:					scale,
+		// tiles_rotate:			tiles_rotate,
+		// tiles_random_rotation:	tiles_random_rotation,
+		// tiles_scale:			tiles_scale,
+		// tiles_random_scale:		tiles_random_scale
+	// );
+
+	// 1. Get UVs for tex_lin_tiles_id_offset_color_tex lookup plus the according cell indices
+	// 2. Perform lookup, correct tiles borders and generate the random values for the tiles
+	// 3. Use random values to generate random values for the randomized UVs
+	//		- random scale (1 floats)
+	//		- random rotation (1 float)
+	//		- random offset (2 floats)
+	//		- random brightness (1 float)
+	// 4. Do the random UV generation using 'vmat_transform'-function
+
+	int rand_val_1, rand_val_2, rand_val_3, rand_val_4, rand_val_5, rand_val_6;
+	float rnd1, rnd2, rnd3, rnd4, rnd5, rnd6;
+	int offset_x, offset_y;
+
+	// the rand tiles texture must be sampled exactly, so texel lookup is the function we will be using here
+	int2 texel_coord = int2(int(::math::frac(base_uv.position.x) * ::tex::width(tex_lin_tiles_id_offset_color_tex)),
+							int(::math::frac(base_uv.position.y) * ::tex::height(tex_lin_tiles_id_offset_color_tex)));
+	float3 tiles_ids = ::tex::texel_float3(tex_lin_tiles_id_offset_color_tex, texel_coord);
+
+	int rand_id = int(tiles_ids.x * 254.f); // Random tile ID's are stored in R-channel., 255 produces visual errors sometimes. 254 seems to work
+											// We are assuming 8bit values and generate integers from 0-255
+	float offset_id = tiles_ids.y;			// Offset of overlapping tiles stored in G-channel
+											// [0	- 0.25[ : ( 0/ 0)  Grayscale value: 0.1
+											// [0.25 - 0.5 [ : (-1/ 0)	Grayscale value: 0.37
+											// [0.5  - 0.75[ : (-1/-1)	Grayscale value: 0.62
+											// [0.75 - 1.0 [ : ( 0/-1)	Grayscale value: 0.87
+	offset_x = offset_id < 0.25f ? 0 : (offset_id < .75f) ? 1 : 0;
+	offset_y = offset_id < 0.5 ? 0 : 1;
+
+	int2 cell_id = int2(int(::math::floor(base_uv.position.x) - offset_x), int(::math::floor(base_uv.position.y) - offset_y));
+
+	rand_val_1 = lowbias32(tiles_random_seed + rand_id + lowbias32(cell_id.x + lowbias32(cell_id.y)));
+	rand_val_2 = lowbias32(rand_val_1);
+	rand_val_3 = lowbias32(rand_val_2);
+	rand_val_4 = lowbias32(rand_val_3);
+	rand_val_5 = lowbias32(rand_val_4);
+	rand_val_6 = lowbias32(rand_val_5);
+
+	rnd1 = uint2float(rand_val_1)/4294967296.f;
+	rnd2 = uint2float(rand_val_2)/4294967296.f;
+	rnd3 = uint2float(rand_val_3)/4294967296.f;
+	rnd4 = uint2float(rand_val_4)/4294967296.f;
+	rnd5 = uint2float(rand_val_5)/4294967296.f;
+	rnd6 = uint2float(rand_val_6)/4294967296.f;
+
+	// Generate 2 different sets of lookups. Re-Using random numbers between functions at different positions.
+	// Hoping that this little save does not leave an impression on the eye
+	::base::texture_coordinate_info tiles_lookup_uvw_1 =
+				vmat_transform(
+					translation:texture_translate + (float2(rnd1, rnd2)) * 17.77,
+					rotation: 	texture_rotate + (tiles_rotate + (rnd3 - 0.5f) * tiles_random_rotation) ,
+					scaling: 	texture_scale * (float2(tiles_scale) + tiles_scale* float2(rnd4) * tiles_random_scale), 
+					system:		::base::texture_coordinate_uvw,
+					uv_space:	uv_space_index
+				);
+
+// ----------------------------------------------------------------------------------
+	color tiles_diff = color(1.0f, 0.0, 0.0f);
+	color grout_diff_lookup = color(0.5f, 1.5f, 0.5f);
+
+	// Lookup for Edgefade and tiles height, using the non-shifted original UV coordinates
+	float3 R_height_G_edgefade_B_ao = ::tex::lookup_float3(
+										tex:   tex_tiles_multi_R_height_G_edgefade_B_ao,
+										coord: float2(base_uv.position.x, base_uv.position.y)
+	);
+
+	// Lookup for Noise 1, Noise 2 and Craquelure
+	float3 R_noise1_G_noise2_B_craquelure = ::tex::lookup_float3(
+										tex:   tex_tiles_multi_R_noise1_G_noise2_B_craquelure,
+										coord: float2(tiles_lookup_uvw_1.position.x, tiles_lookup_uvw_1.position.y)
+	);
+	
+	
+	float3 R_frough_G_thickness_B_drops = nonrepeat_lookup(
+		texture: tex_tiles_multi_R_rough_G_thickness_B_drops,
+		uvw:	base_uv,
+		average_color: float3(0.499f, 0.365f, 0.015f),
+		texture_scale: texture_scale * .3f,
+		patch_size:		6.0,
+		seed:			tiles_random_seed
+	);
+
+	float grout_mask = ::math::smoothstep(grout_height, grout_height + grout_softness, R_height_G_edgefade_B_ao.x);
+
+	if (grout_mask < 0.999f)
+	{
+		// Grout Diffuse
+		grout_diff_lookup = ::base::file_texture(
+												texture: tex_srgb_grout_diffuse_tex,
+												uvw: grout_uv).tint;
+		grout_diff_lookup = ::nvidia::core_definitions::blend_colors(
+								color_1: grout_diff_lookup,
+								color_2: color(grout_brightness),
+								mode: 	 ::base::color_layer_overlay,
+								weight:	 1.0f).tint;
+	}
+	
+	if (grout_mask >= 0.001f)
+	{
+	// Compositing the diffuse color
+	
+		// Diamond Tiles Color
+		::base::color_layer layer_1 = ::base::color_layer(
+			layer_color:	tiles_color_diamond,
+			weight:			tiles_ids.z,
+			mode:			::base::color_layer_blend
+		);
+		::base::color_layer layer_2 = ::base::color_layer(
+			layer_color: 	tiles_color_2,
+			weight:			R_noise1_G_noise2_B_craquelure.x * (1.0f - tiles_ids.z),
+			mode:			::base::color_layer_blend
+		);
+		// Color 3
+		::base::color_layer layer_3 = ::base::color_layer(
+			layer_color:	tiles_color_3,
+			weight:			R_noise1_G_noise2_B_craquelure.y * (1.0f - tiles_ids.z),
+			mode:			::base::color_layer_blend
+		);
+		// Color 4
+		::base::color_layer layer_4 = ::base::color_layer(
+			layer_color:	color(0.0f),
+			weight:			R_noise1_G_noise2_B_craquelure.y * (tiles_ids.z) * tiles_diamond_texture_amount,
+			mode:			::base::color_layer_overlay
+		);
+		// Varying brightness
+		::base::color_layer layer_5 = ::base::color_layer(
+			layer_color:	color(rnd6),
+			weight:			tiles_random_brightness,
+			mode:			::base::color_layer_overlay
+		);
+		// Varying glazing thickness
+		::base::color_layer layer_6 = ::base::color_layer(
+			layer_color:	ceramic_color,
+			weight:			R_frough_G_thickness_B_drops.y * glazing_varying_thickness_weight * .15f,
+			mode:			::base::color_layer_blend
+		);
+		// Edge Fade
+		::base::color_layer layer_7 = ::base::color_layer(
+			layer_color:	ceramic_color,
+			weight:			glazing_edgefade_weight * (R_height_G_edgefade_B_ao.y + (0.5 - rnd3) * glazing_edgefade_randomness),
+			mode:			::base::color_layer_blend
+		);
+		// Craquelure
+		::base::color_layer layer_8 = ::base::color_layer(
+			layer_color:	color(::math::pow(R_noise1_G_noise2_B_craquelure.z, 2.2f)),
+			weight:			glazing_craquelure_weight,
+			mode:			::base::color_layer_overlay
+		);
+
+		::base::color_layer[] tile_layers = ::base::color_layer[](
+			layer_1, layer_2, layer_3, layer_4, layer_5, layer_6, layer_7, layer_8
+		);
+
+		tiles_diff = ::base::blend_color_layers(
+			layers: tile_layers,
+			base: tiles_color_1
+		).tint;
+	}
+
+	::base::texture_return tiles_diff_final = ::nvidia::core_definitions::blend_colors(
+		color_1:	grout_diff_lookup,
+		color_2:	tiles_diff,
+		mode:		::nvidia::core_definitions::color_layer_blend,
+		weight:		grout_mask
+	);
+
+	tiles_diff_final = (ao_amount > 0.0) ? ::nvidia::core_definitions::blend_colors(
+									color_1:	tiles_diff_final.tint,
+									color_2:	color(R_height_G_edgefade_B_ao.z),
+									mode:		::nvidia::core_definitions::color_layer_multiply,
+									weight:		(1.0f - grout_height) * ao_amount
+								) : tiles_diff_final;
+
+
+// ******** COAT Roughness ********
+
+	float glazing_roughness = histogram_range(R_frough_G_thickness_B_drops.x, tiles_roughness_range, tiles_roughness);
+	glazing_roughness += R_frough_G_thickness_B_drops.z * drops_amount;
+	glazing_roughness = ::math::lerp(grout_roughness, glazing_roughness, grout_mask);
+
+
+// ******** NORMALS ********
+	// Tiles normal
+	float3 tiles_normal = ::base::tangent_space_normal_texture(
+		texture:	tex_lin_tiles_norm,
+		factor:		tiles_bump_strength,
+		uvw:		base_uv
+	);
+
+	// Grout Normal
+	float3 grout_normal = ::base::tangent_space_normal_texture(
+		texture:	tex_lin_grout_normal,
+		factor:		grout_bump_strength,
+		uvw:		grout_uv
+	);
+
+	float3 orange_peel_normal = ::base::perlin_noise_bump_texture(
+		uvw:			base_uv,
+		factor:			glazing_orange_peel_bump * .2f,
+		size:			glazing_orangepeel_size * ::state::scene_units_per_meter(),
+		apply_marble:	false,
+		apply_dent:		false,
+		noise_phase:	0.0f,
+		noise_levels:	glazing_orangepeel_noise_levels,
+		absolute_noise:	false,
+		ridged_noise:	false,
+		noise_distortion: glazing_orangepeel_distortion,
+		noise_threshold_high:	1.0f,
+		noise_threshold_low:	0.0f,
+		noise_bands:			1.0f,
+		normal: ::state::normal()
+	);
+
+	// Randomized Tiles normals - This needs to be probably rotated with the normal of the uv-tiles
+	float slope_amount = 0.07 * tiles_random_slope_orientation;
+	float3 slope = ::math::normalize(
+			::state::texture_tangent_u(0) * (rnd5 - 0.5) * slope_amount +
+			::state::texture_tangent_v(0) * (rnd6 - 0.5) * slope_amount +
+			::state::normal() 							* ((1.0f - slope_amount) + 1.0f)
+	);
+
+	// http://blog.selfshadow.com/publications/blending-in-detail/
+	float3 n_t 							= transform_internal_to_tangent(slope);
+	float3 tiles_normal_t 				= transform_internal_to_tangent(tiles_normal);
+	float3 orange_peel_normal_t			= transform_internal_to_tangent(orange_peel_normal);
+
+	// 1st detail normal
+	n_t=n_t + float3(0.,0.,1.);
+	tiles_normal_t = tiles_normal_t *  float3(-1.,-1.,1.);
+	float3 n = n_t*math::dot(n_t, tiles_normal_t)/n_t.z - tiles_normal_t;
+
+	// 2nd detail normal
+	n_t = n + float3(0.,0.,1.);
+	orange_peel_normal_t = orange_peel_normal_t *  float3(-1.,-1.,1.);
+	n = n_t*math::dot(n_t, orange_peel_normal_t)/n_t.z - orange_peel_normal_t;
+
+	float3 normal_final = ::math::normalize(transform_tangent_to_internal(n));
+	normal_final		= ::math::lerp(grout_normal, normal_final, grout_mask);
+
+	return ceramic_tiles_return(
+		diffuse: 					tiles_diff_final.tint,
+		dirt:						R_frough_G_thickness_B_drops.x,
+		tiles_isotropic_rough_squared: 0.2,
+		glazing_roughness:			glazing_roughness * glazing_roughness,
+		normal: 					normal_final,
+		randvals:					float4(rnd1, rnd2, rnd3, rnd4),
+		tiles_uvw:					tiles_lookup_uvw_1
+	);
+}
+
+
+export material Ceramic_Tiles_Glazed_Pinwheel(
+
+	// Main Tweaks
+	int tiles_random_seed				= 0
+	[[
+		::anno::description("Choose a different seed number to obtain a different randomization pattern"),
+		::anno::display_name("Tiles Random Seed"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(0)
+	]],
+	color tiles_color_1					= color(0.014444f, 0.034340f, 0.215861f)
+	[[
+		::anno::description("Mixing color 1 for the ceramic tiles"),
+		::anno::display_name("Tiles Color 1"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(1)
+	]],
+	color tiles_color_2					= color(0.017642f, 0.039546f, 0.219526f)
+	[[
+		::anno::description("Mixing color 2 for the ceramic tiles"),
+		::anno::display_name("Tiles Color 2"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(2)
+	]],
+	color tiles_color_3					= color(0.014444f, 0.018500f, 0.219526f)
+	[[
+		::anno::description("Mixing color 3 for the tiles"),
+		::anno::display_name("Tiles Color 3"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(3)
+	]],
+	color tiles_color_diamond					= color(0.586f, 0.759f, 0.774f)
+	[[
+		::anno::description("Color for the diamond"),
+		::anno::display_name("Diamond Color"),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(4)
+	]],
+	float tiles_diamond_texture_amount		= 0.2f
+	[[
+		::anno::description("The amount of dark texture to be applied to the diamond"),
+		::anno::display_name("Diamond Texture Amound"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(5)
+	]],
+	float tiles_random_brightness		= 0.015f
+	[[
+		::anno::description("Randomly modifies the brightness of the tiles"),
+		::anno::display_name("Tiles Random Brightness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::ui_order(6)
+	]],
+	float tiles_roughness			= 0.039f
+	[[
+		::anno::description("The basic roughness of the tiles"),
+		::anno::display_name("Tiles Roughness"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(7)
+	]],
+	float tiles_roughness_range		= 0.003f
+	[[
+		::anno::description("The amount how much the roughness is varying around its base roughness value"),
+		::anno::display_name("Tiles Roughness Range"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(8)
+	]],
+	float tiles_random_slope_orientation = 0.04f
+	[[
+		::anno::description("When increasing this value, tiles are slanted in random directions. "
+		"This breaks up the even look and gives the appearance that the tiles work was done by hand"),
+		::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::hard_range(0.0f, 5.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(9)
+	]],
+	uniform float glazing_orange_peel_bump		= 0.03f
+	[[
+		::anno::description("Adds an unevenness to the glazing so that it appears more natural"),
+		::anno::display_name("Glazing Orange Peel Bump"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::hard_range(0.0f, 5.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(10)
+	]],
+	float glazing_edgefade_weight		= 0.0f
+	[[
+		::anno::description("Adds a fading effect so that the glazing is thinner at the edges "
+		"of the tiles. This revelas the ceramic color which will begin to shine through."),
+		::anno::display_name("Glazing Edgefade Weight"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(11)
+	]],
+	float glazing_edgefade_randomness	= 0.0f
+	[[
+		::anno::description("Adds Randomness to the edgefade effect, so that tiles have varying edgefading effect."),
+		::anno::display_name("Glazing Edgefade Randomness"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(12)
+	]],
+	float glazing_craquelure_weight		= 0.05f
+	[[
+		::anno::description("Adds craquelure to the tiles to give them a more antique appearance"),
+		::anno::display_name("Glazing Craquelure Weight"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(13)
+	]],
+	float drops_amount				= 0.05f
+	[[
+		::anno::description("Adds residue of dried drops on the tiles which can be seen in the specular highlight"),
+		::anno::display_name("Drops Amount"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(14)
+	]],
+	float grout_brightness			= 0.7f
+	[[
+		::anno::description("Adjusts the brightness of the grout"),
+		::anno::display_name("Grout Brightness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(15)
+	]],
+	float grout_height					= 0.05f
+	[[
+		::anno::description("The height of the grout"),
+		::anno::display_name("Grout Height"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(16)
+	]],
+	uniform float tiles_bump_strength	= 1.0f
+	[[
+		::anno::description("Adjusts the strength of the tiles bump map"),
+		::anno::display_name("Tiles Bump Strength"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Appearance"),
+		::anno::ui_order(17)
+	]],
+	color dirt_color			= color(0.0582f, 0.037f, 0.0265f)
+	[[
+		::anno::description("Sets the color of the dirt layer"),
+		::anno::display_name("Dirt Layer Color"),
+		::anno::in_group("Appearance", "Dirt"),
+		::anno::ui_order(18)
+	]],
+	float dirt_weight	= 0.0f
+	[[
+		::anno::description("The weight of the dirt layer"),
+		::anno::display_name("Dirt Weight"),
+		::anno::in_group("Appearance", "Dirt"),
+		::anno::soft_range(0.f, 1.f),
+		::anno::ui_order(19)
+	]],
+	
+	uniform float grout_scale	= 1.0f
+	[[
+		::anno::description("Scales the texture lookup for the grout independently from the tiles"),
+		::anno::display_name("Grout Scale"),
+		::anno::in_group("Advanced", "Grout"),
+		::anno::soft_range(0.f, 2.f),
+		::anno::ui_order(20)
+	]],
+	
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture"),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform"),
+		::anno::ui_order(21)
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees"),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(-360.f, 360.f),
+		::anno::ui_order(22)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size"),
+		::anno::display_name("Texture Scale"),
+		::nvidia::core_definitions::dimension(float2(1.0, 1.0)),
+		::anno::in_group("Transform"),
+		::anno::ui_order(23)
+	]],
+
+
+	float tiles_rotate		  		= 0.0f							// global rotation of texture in the tiles
+	[[
+		::anno::description("Globally rotates the texture lookup for the tiles textures"),
+		::anno::display_name("Tiles Texture Rotate"),
+		::anno::in_group("Advanced", "Tiles"),
+		::anno::ui_order(24)
+	]],
+	float tiles_random_rotation 		= 1.0f							// random rotation amount in degrees
+	[[
+		::anno::description("Randomly rotates the textures for the tiles"),
+		::anno::display_name("Tiles Random Rotation"),
+		::anno::soft_range(0.f, 360.f),
+		::anno::in_group("Advanced", "Tiles"),
+		::anno::ui_order(25)
+	]],
+	float tiles_scale		   		= 1.0f
+	[[
+		::anno::description("Scales the texture in the tiles"),
+		::anno::display_name("Tiles Texture Scale"),
+		::anno::soft_range(0.0f, 2.0f),
+		::anno::in_group("Advanced", "Tiles"),
+		::anno::ui_order(26)
+	]],
+	float tiles_random_scale			= 0.0f
+	[[
+		::anno::description("Adds random variation to the scaling of the texture lookup for the tiles"),
+		::anno::display_name("Tiles Random Texture Scale"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::in_group("Advanced", "Tiles"),
+		::anno::ui_order(27)
+	]],
+
+	float glazing_varying_thickness_weight = 0.00f
+	[[
+		::anno::description("Adds a varying thickness to the glazing which makes the underlying "
+		"ceramic color shine through"),
+		::anno::display_name("Glazing Varying Thickness Weight"),
+		::anno::hard_range(0.0f, 1.0f),
+		::anno::in_group("Advanced", "Glazing"),
+		::anno::ui_order(28)
+	]],
+	uniform float glazing_orangepeel_size		= 0.05f
+	[[
+		::anno::description("Adjusts the size of the orangepeel on the glazing"),
+		::anno::display_name("Glazing Orange Peel Size"),
+		::anno::soft_range(0.0f, 1.0f),
+		::anno::in_group("Advanced", "Glazing"),
+		::anno::ui_order(29)
+	]],
+	uniform int glazing_orangepeel_noise_levels	= 4
+	[[
+		::anno::description("A higher number of levels makes the glazing layer to appear noisier "
+		"while a low level gives the glazing a realtively smooth appearance"),
+		::anno::display_name("Glazing Orange Peel Noise Levels"),
+		::anno::soft_range(0, 6),
+		::anno::in_group("Advanced", "Glazing"),
+		::anno::ui_order(30)
+	]],
+
+	float grout_roughness			= 0.8f
+	[[
+		::anno::description("The roughness of the grout"),
+		::anno::display_name("Grout Roughness"),
+		::anno::in_group("Advanced", "Grout"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(31)
+	]],
+	float grout_softness				= 0.05f
+	[[
+		::anno::description("The softness of the transition between the grout and the tiles"),
+		::anno::display_name("Grout Transition Roughness"),
+		::anno::in_group("Advanced", "Grout"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(32)
+	]],
+	uniform float grout_bump_strength	= 1.0f
+	[[
+		::anno::description("The strength of the grout bumpmap"),
+		::anno::display_name("Grout Bump Strength"),
+		::anno::in_group("Advanced", "Grout"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(33)
+	]],
+	float ao_amount						= 0.5f
+	[[
+		::anno::description("The amount of ambient occlusion to convey more depth of grout. Used for artistical tweaking"),
+		::anno::display_name("Ambient Occlusion Amount"),
+		::anno::in_group("Advanced"),
+		::anno::hard_range(0.f, 1.f),
+		::anno::ui_order(34)
+	]],
+	uniform int uv_space_index			= 0
+	[[
+		::anno::description("The UV texture space to be used"),
+		::anno::display_name("Texture Space"),
+		::anno::in_group("Advanced"),
+		::anno::ui_order(35)
+	]]
+
+)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Dark Blue"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Glazed_Pinwheel.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "blue", "dark", "saturated")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = 
+let {
+	texture_2d tex_lin_tiles_id_offset_color_tex 			  = texture_2d("./textures/pinwheel_R_id_G_offs_B_color.png", ::tex::gamma_linear);
+	texture_2d tex_lin_tiles_norm 							  = texture_2d("./textures/pinwheel_norm.jpg", ::tex::gamma_linear);
+	texture_2d tex_tiles_multi_R_height_G_edgefade_B_ao		  = texture_2d("./textures/pinwheel_multi_R_height_G_edgefade_B_ao.jpg", ::tex::gamma_linear);
+	texture_2d tex_tiles_multi_R_noise1_G_noise2_B_craquelure = texture_2d("./textures/diamond_multi_R_noise1_G_noise2_B_craquelure.jpg", ::tex::gamma_linear);
+	texture_2d tex_tiles_multi_R_rough_G_thickness_B_drops	  = texture_2d("./textures/diamond_multi_R_rough_G_thickness_B_drops.jpg", ::tex::gamma_linear);
+	texture_2d tex_srgb_grout_diffuse_tex 					  = texture_2d("./textures/mortar_diff.jpg", ::tex::gamma_srgb);
+	texture_2d tex_lin_grout_normal							  = texture_2d("./textures/mortar_norm.jpg", ::tex::gamma_linear);
+	
+
+	ceramic_tiles_return ret = Ceramic_Tiles_Glazed_Generator(
+		tex_lin_tiles_id_offset_color_tex: 					tex_lin_tiles_id_offset_color_tex,
+		tex_tiles_multi_R_noise1_G_noise2_B_craquelure: 	tex_tiles_multi_R_noise1_G_noise2_B_craquelure,
+		tex_tiles_multi_R_rough_G_thickness_B_drops: 		tex_tiles_multi_R_rough_G_thickness_B_drops,
+		tex_tiles_multi_R_height_G_edgefade_B_ao:			tex_tiles_multi_R_height_G_edgefade_B_ao,
+		tex_lin_tiles_norm: 								tex_lin_tiles_norm,
+		tex_srgb_grout_diffuse_tex:			tex_srgb_grout_diffuse_tex,
+		tex_lin_grout_normal:				tex_lin_grout_normal,
+
+		tiles_random_seed:					tiles_random_seed,
+		tiles_color_1:						tiles_color_1,
+		tiles_color_2:						tiles_color_2,
+		tiles_color_3:						tiles_color_3,
+		tiles_color_diamond:				tiles_color_diamond,
+		tiles_diamond_texture_amount:		tiles_diamond_texture_amount,
+		tiles_random_brightness:			tiles_random_brightness,
+		tiles_bump_strength:				tiles_bump_strength,
+		tiles_random_slope_orientation:		tiles_random_slope_orientation,
+		tiles_rotate:						tiles_rotate,
+		tiles_random_rotation :				tiles_random_rotation,
+		tiles_scale :						tiles_scale,
+		tiles_random_scale:					tiles_random_scale,
+
+		glazing_varying_thickness_weight:	glazing_varying_thickness_weight,
+		glazing_edgefade_weight:			glazing_edgefade_weight,
+		glazing_edgefade_randomness:		glazing_edgefade_randomness,
+		glazing_craquelure_weight:			glazing_craquelure_weight,
+		glazing_orange_peel_bump:			glazing_orange_peel_bump,
+		glazing_orangepeel_size:			glazing_orangepeel_size,
+		glazing_orangepeel_noise_levels:	glazing_orangepeel_noise_levels,
+
+		tiles_roughness:					tiles_roughness,
+		tiles_roughness_range:				tiles_roughness_range,
+		drops_amount:						drops_amount,
+		grout_roughness:					grout_roughness,
+
+		grout_brightness:					grout_brightness,
+		grout_height:						grout_height,
+		grout_softness:						grout_softness,
+		grout_bump_strength:				grout_bump_strength,
+		grout_scale:						grout_scale,
+		ao_amount:							ao_amount,
+
+		texture_translate:					texture_translate,
+		texture_rotate:						texture_rotate,
+		texture_scale:						texture_scale,
+
+		uv_space_index:						uv_space_index
+	);
+
+	bsdf diff = ::df::diffuse_reflection_bsdf(
+		tint: ret.diffuse
+	);
+	
+	
+
+
+} in material (
+	surface : material_surface (
+		scattering : 
+		::df::weighted_layer(
+			weight:	dirt_weight * ret.dirt,
+			layer: ::df::diffuse_reflection_bsdf ( tint: dirt_color),
+			base:	df::fresnel_layer (
+				ior : 1.5,
+				layer : df::microfacet_ggx_smith_bsdf(
+					roughness_u: ret.glazing_roughness,
+					roughness_v: ret.glazing_roughness,
+					tint : color(1.),
+					mode : df::scatter_reflect),
+				base : diff
+			)
+		)
+	),
+	geometry: material_geometry(
+		normal: ret.normal
+	)
+);
+ 
+export material Ceramic_Tiles_Pinwheel_Dark_Blue_New_Matte(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Dark Blue Matte"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Dark_Blue_New_Matte.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "matte", "blue", "dark", "cool", "saturated")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.014444f, 0.034340f, 0.215861f),
+	tiles_color_2:					color(0.017642f, 0.039546f, 0.219526f),
+	tiles_color_3:					color(0.014444f, 0.018500f, 0.219526f),
+	tiles_color_diamond:			color(0.774f, 0.73f, 0.592f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.015f,
+	tiles_roughness:				0.32f,
+	tiles_roughness_range:			0.2f,
+	tiles_random_slope_orientation:	0.15f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.5f,
+	uv_space_index:					0
+);
+ 
+export material Ceramic_Tiles_Pinwheel_Dark_Blue_Varied_New(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Dark Blue Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Dark_Blue_Varied_New.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "blue", "dark", "cool", "saturated", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				1,
+	tiles_color_1:					color(0.014444f, 0.034340f, 0.215861f),
+	tiles_color_2:					color(0.017642f, 0.039546f, 0.219526f),
+	tiles_color_3:					color(0.014444f, 0.018500f, 0.219526f),
+	tiles_color_diamond:			color(0.774f, 0.73f, 0.592f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		1.0f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.003f,
+	tiles_random_slope_orientation:	0.15f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.07f,
+	glazing_edgefade_randomness:	0.77f,
+	glazing_craquelure_weight:		0.7f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.5f,
+	uv_space_index:					0
+);
+ 
+ 
+export material Ceramic_Tiles_Pinwheel_Antique_White(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Antique White"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Antique_White.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "old", "antique", "shiny", "white", "light", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				2,
+	tiles_color_1:					color(0.603827f, 0.533276f, 0.473531f),
+	tiles_color_2:					color(0.496933f, 0.445201f, 0.401978f),
+	tiles_color_3:					color(0.571125f, 0.539479f, 0.462077f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.02f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.1f,
+	glazing_orange_peel_bump:		0.18f,
+	glazing_edgefade_weight:		0.17f,
+	glazing_edgefade_randomness:	0.50f,
+	glazing_craquelure_weight:		0.66f,
+	drops_amount:					0.20f,
+	grout_brightness:				0.09f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.0f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.25f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						1.00f,
+	uv_space_index:					0
+);
+
+
+
+export material Ceramic_Tiles_Pinwheel_White_Matte(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - White Matte"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_White_Matte.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "matte", "white", "light", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.651406f, 0.651406f, 0.651406f),
+	tiles_color_2:					color(0.651406f, 0.651406f, 0.597202f),
+	tiles_color_3:					color(0.623960f, 0.623960f, 0.623960f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.02f,
+	tiles_roughness:				0.32f,
+	tiles_roughness_range:			0.07f,
+	tiles_random_slope_orientation:	0.71f,
+	glazing_orange_peel_bump:		0.2f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.20f,
+	drops_amount:					0.23f,
+	grout_brightness:				0.11f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						1.0f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Antique_White_Dirty(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Antique White Dirty"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Antique_White.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "worn", "old", "antique", "matte", "dirty", "white", "light")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				3,
+	tiles_color_1:					color(0.603827f, 0.533276f, 0.473531f),
+	tiles_color_2:					color(0.496933f, 0.445201f, 0.401978f),
+	tiles_color_3:					color(0.571125f, 0.539479f, 0.462077f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.02f,
+	tiles_roughness:				0.5f,
+	tiles_roughness_range:			0.6f,
+	tiles_random_slope_orientation:	0.1f,
+	glazing_orange_peel_bump:		0.18f,
+	glazing_edgefade_weight:		0.17f,
+	glazing_edgefade_randomness:	0.50f,
+	glazing_craquelure_weight:		0.66f,
+	drops_amount:					0.20f,
+	grout_brightness:				0.09f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.6f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.0f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.25f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						1.00f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Black(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Black"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Black.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "black", "dark", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.012983f, 0.012983f, 0.012983f),
+	tiles_color_2:					color(0.012983f, 0.012983f, 0.012983f),
+	tiles_color_3:					color(0.009721f, 0.009721f, 0.009721f),
+	tiles_color_diamond:			color(0.73f, 0.68f, 0.567f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.015f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.5f,
+	uv_space_index:					0
+ );
+
+
+export material Ceramic_Tiles_Pinwheel_Black_Matte(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Black Matte"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Black_Matte.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "matte", "black", "dark", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.012983f, 0.012983f, 0.012983f),
+	tiles_color_2:					color(0.012983f, 0.012983f, 0.012983f),
+	tiles_color_3:					color(0.009721f, 0.009721f, 0.009721f),
+	tiles_color_diamond:			color(0.73f, 0.68f, 0.567f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.015f,
+	tiles_roughness:				0.32f,
+	tiles_roughness_range:			0.38f,
+	tiles_random_slope_orientation:	0.20f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.15f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.5f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Black_Matte_Rough(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Black Matte Rough"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Black_Matte_Rough.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "rough", "bumped", "matte", "black", "dark", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				17,
+	tiles_color_1:					color(0.012983f, 0.012983f, 0.012983f),
+	tiles_color_2:					color(0.012983f, 0.012983f, 0.012983f),
+	tiles_color_3:					color(0.009721f, 0.009721f, 0.009721f),
+	tiles_color_diamond:			color(0.73f, 0.68f, 0.567f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.015f,
+	tiles_roughness:				0.35f,
+	tiles_roughness_range:			0.13f,
+	tiles_random_slope_orientation:	0.20f,
+	glazing_orange_peel_bump:		0.50f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.15f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels:6,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.5f,
+	uv_space_index:					0
+);
+
+
+
+
+export material Ceramic_Tiles_Pinwheel_Graphite(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Graphite"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Graphite.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "gray", "graphite", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.187821f, 0.187821f, 0.162029f),
+	tiles_color_2:					color(0.187821f, 0.187821f, 0.162029f),
+	tiles_color_3:					color(0.187821f, 0.187821f, 0.187821f),
+	tiles_color_diamond:			color(0.723f, 0.715f, 0.673f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.1f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.15f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.14f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						1.0f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Graphite_Varied(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Graphite Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Graphite_Varied.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "gray", "graphite", "neutral", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.187821f, 0.187821f, 0.162029f),
+	tiles_color_2:					color(0.187821f, 0.187821f, 0.162029f),
+	tiles_color_3:					color(0.187821f, 0.187821f, 0.187821f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.78f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.15f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.09f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						1.0f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Graphite_Matte(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Graphite Matte"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Graphite_Matte.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "matte", "gray", "graphite", "neutral")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.187821f, 0.187821f, 0.162029f),
+	tiles_color_2:					color(0.187821f, 0.187821f, 0.162029f),
+	tiles_color_3:					color(0.187821f, 0.187821f, 0.187821f),
+	tiles_color_diamond:			color(0.723f, 0.715f, 0.673f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.1f,
+	tiles_roughness:				0.32f,
+	tiles_roughness_range:			0.1f,
+	tiles_random_slope_orientation:	0.15f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.14f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						1.0f,
+	uv_space_index:					0
+);
+
+export material Ceramic_Tiles_Pinwheel_Green(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Green"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Green.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "green", "saturated")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.099899f, 0.246201f, 0.008568f),
+	tiles_color_2:					color(0.155926f, 0.242281f, 0.049707f),
+	tiles_color_3:					color(0.012286f, 0.084376f, 0.033105f),
+	tiles_color_diamond:			color(0.73f, 0.673f, 0.243f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.12f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.003f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.11f,
+	glazing_edgefade_weight:		0.07f,
+	glazing_edgefade_randomness:	0.71f,
+	glazing_craquelure_weight:		1.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.48f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+export material Ceramic_Tiles_Pinwheel_Green_Matte(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Green Matte"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Green_Matte.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "matte", "green", "saturated")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.099899f, 0.246201f, 0.008568f),
+	tiles_color_2:					color(0.155926f, 0.242281f, 0.049707f),
+	tiles_color_3:					color(0.012286f, 0.084376f, 0.033105f),
+	tiles_color_diamond:			color(0.701f, 0.73f, 0.612f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.12f,
+	tiles_roughness:				0.37f,
+	tiles_roughness_range:			0.11f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.11f,
+	glazing_edgefade_weight:		0.07f,
+	glazing_edgefade_randomness:	0.71f,
+	glazing_craquelure_weight:		1.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.48f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.45f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Green_Varied(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Dark Green Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Green_Varied.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "matte", "green", "dark", "saturated", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				1,
+	tiles_color_1:					color(0.099899f, 0.246201f, 0.008568f),
+	tiles_color_2:					color(0.155926f, 0.242281f, 0.049707f),
+	tiles_color_3:					color(0.012286f, 0.084376f, 0.033105f),
+	tiles_color_diamond:			color(0.73f, 0.673f, 0.243f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.79f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.003f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.11f,
+	glazing_edgefade_weight:		0.07f,
+	glazing_edgefade_randomness:	0.71f,
+	glazing_craquelure_weight:		1.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.48f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Vintage_Green_Bathroom(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Vintage Green"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Vintage_Green_Bathroom.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "antique", "old", "matte", "green", "multicolor", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				9,
+	tiles_color_1:					color(0.012286f, 0.361307f, 0.130136f),
+	tiles_color_2:					color(0.488f, 0.431f, 0.0478f),
+	tiles_color_3:					color(0.003347f, 0.034340f, 0.003035f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.63f,
+	tiles_roughness:				0.1f,
+	tiles_roughness_range:			0.21f,
+	tiles_random_slope_orientation:	0.3f,
+	glazing_orange_peel_bump:		0.09f,
+	glazing_edgefade_weight:		0.29f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.6f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			0.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.5f,
+	uv_space_index:					0
+ );
+ 
+
+export material Ceramic_Tiles_Pinwheel_Mint(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Mint Green"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Mint.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "mint", "green", "light")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.208637f, 0.309469f, 0.130136f),
+	tiles_color_2:					color(0.205079f, 0.304987f, 0.130136f),
+	tiles_color_3:					color(0.201556f, 0.300544f, 0.124772f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.04f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.05f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Mint_Varied(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Mint Green Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Mint_Varied.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "mint", "green", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.208637f, 0.309469f, 0.130136f),
+	tiles_color_2:					color(0.205079f, 0.304987f, 0.130136f),
+	tiles_color_3:					color(0.201556f, 0.300544f, 0.124772f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.48f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.05f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+ 
+export material Ceramic_Tiles_Pinwheel_Lime_Green(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Lime Green"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Lime_Green.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "lime", "green", "light")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.313989f, 0.361307f, 0.027321f),
+	tiles_color_2:					color(0.309469f, 0.356400f, 0.027321f),
+	tiles_color_3:					color(0.304987f, 0.351533f, 0.027321f),
+	tiles_color_diamond:			color(0.0415f, 0.0892f, 0.0265f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.03f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.04f,
+	glazing_edgefade_weight:		0.12f,
+	glazing_edgefade_randomness:	0.37f,
+	glazing_craquelure_weight:		0.32f,
+	drops_amount:					0.22f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Lime_Green_Varied(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Lime Green Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Lime_Green_Varied.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "lime", "green", "light", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.309469f, 0.361307f, 0.015996f),
+	tiles_color_2:					color(0.304987f, 0.356400f, 0.016807f),
+	tiles_color_3:					color(0.300544f, 0.351533f, 0.017642f),
+	tiles_color_diamond:			color(0.0415f, 0.0892f, 0.0265f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.56f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.04f,
+	glazing_edgefade_weight:		0.12f,
+	glazing_edgefade_randomness:	0.37f,
+	glazing_craquelure_weight:		0.32f,
+	drops_amount:					0.22f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+
+export material Ceramic_Tiles_Pinwheel_Yellow(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Yellow"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Yellow.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "yellow", "warm", "saturated", "light")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.590619f, 0.371238f, 0.033105f),
+	tiles_color_2:					color(0.584078f, 0.366253f, 0.033105f),
+	tiles_color_3:					color(0.577580f, 0.361307f, 0.033105f),
+	tiles_color_diamond:			color(0.0824f, 0.0781f, 0.0697f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.02f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.11f,
+	glazing_edgefade_randomness:	0.48f,
+	glazing_craquelure_weight:		0.42f,
+	drops_amount:					0.20f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+		
+	
+export material Ceramic_Tiles_Pinwheel_Yellow_Varied(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Yellow Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Yellow_Varied.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "yellow", "warm", "saturated", "light", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.590619f, 0.361307f, 0.023153f),
+	tiles_color_2:					color(0.584078f, 0.356400f, 0.023153f),
+	tiles_color_3:					color(0.577580f, 0.351533f, 0.024158f),
+	tiles_color_diamond:			color(0.0824f, 0.0781f, 0.0697f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.49f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.11f,
+	glazing_edgefade_randomness:	0.48f,
+	glazing_craquelure_weight:		0.42f,
+	drops_amount:					0.20f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.00f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+
+
+
+export material Ceramic_Tiles_Pinwheel_Petrol(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Petrol"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Petrol.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "petrol", "cool")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				13,
+	tiles_color_1:					color(0.029557f, 0.107023f, 0.135633f),
+	tiles_color_2:					color(0.029557f, 0.104616f, 0.132868f),
+	tiles_color_3:					color(0.028426f, 0.102242f, 0.130136f),
+	tiles_color_diamond:			color(0.272f, 0.415f, 0.415f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.03f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.04f,
+	glazing_edgefade_weight:		0.1f,
+	glazing_edgefade_randomness:	0.46f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.25f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+
+
+export material Ceramic_Tiles_Pinwheel_Petrol_Varied(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Petrol Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Petrol_Varied.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "petrol", "cool", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				14,
+	tiles_color_1:					color(0.029557f, 0.107023f, 0.135633f),
+	tiles_color_2:					color(0.029557f, 0.104616f, 0.132868f),
+	tiles_color_3:					color(0.028426f, 0.102242f, 0.130136f),
+	tiles_color_diamond:			color(0.272f, 0.415f, 0.415f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.6f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.008f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.04f,
+	glazing_edgefade_weight:		0.1f,
+	glazing_edgefade_randomness:	0.46f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.00f,
+	grout_brightness:				0.70f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.25f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+export material Ceramic_Tiles_Pinwheel_Sky(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Sky"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Sky.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "blue", "sky", "cool")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.130136f, 0.644480f, 0.693872f),
+	tiles_color_2:					color(0.135633f, 0.491021f, 0.644480f),
+	tiles_color_3:					color(0.023153f, 0.135633f, 0.212231f),
+	tiles_color_diamond:			color(0.774f, 0.759f, 0.708f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.03f,
+	tiles_roughness:				0.05f,
+	tiles_roughness_range:			0.02f,
+	tiles_random_slope_orientation:	0.23f,
+	glazing_orange_peel_bump:		0.15f,
+	glazing_edgefade_weight:		0.19f,
+	glazing_edgefade_randomness:	0.34f,
+	glazing_craquelure_weight:		0.42f,
+	drops_amount:					0.40f,
+	grout_brightness:				0.71f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.25f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						1.00f,
+	uv_space_index:					0
+);
+ 
+
+export material Ceramic_Tiles_Pinwheel_Red(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Red"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Red.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "red", "warm", "saturated")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.327778f, 0.021219f, 0.020289f),
+	tiles_color_2:					color(0.327778f, 0.021219f, 0.017642f),
+	tiles_color_3:					color(0.274677f, 0.018500f, 0.017642f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.015f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.003f,
+	tiles_random_slope_orientation:	0.10f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.09f,
+	grout_brightness:				0.09f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.25f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+ 
+ 
+export material Ceramic_Tiles_Pinwheel_Red_Varied(*)
+[[
+	::anno::description("A glazed ceramic tiles material with interspersed diamond tiles. Offers controls for roughnes, grout, dirt, drop deposits and more"),
+	::anno::in_group("Tiles"),
+	::anno::display_name("Glazed Pinwheel Tiles - Red Varied"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Ceramic_Tiles_Glazed_Pinwheel.Ceramic_Tiles_Pinwheel_Red_Varied.png"),
+	::anno::key_words(string[]("tiles", "tiled", "ceramic", "glazed", "bathroom", "sanitary", "kitchen", "floor", "wall", "interior", "exterior", "architecture", "pinwheel", "new", "shiny", "red", "warm", "saturated", "random")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Ceramic_Tiles_Glazed_Pinwheel(
+	tiles_random_seed:				0,
+	tiles_color_1:					color(0.327778f, 0.021219f, 0.020289f),
+	tiles_color_2:					color(0.327778f, 0.021219f, 0.017642f),
+	tiles_color_3:					color(0.274677f, 0.018500f, 0.017642f),
+	tiles_color_diamond:			color(0.036889f, 0.035601f, 0.023153f),
+	tiles_diamond_texture_amount:	0.2f,
+	tiles_random_brightness:		0.6f,
+	tiles_roughness:				0.039f,
+	tiles_roughness_range:			0.003f,
+	tiles_random_slope_orientation:	0.2f,
+	glazing_orange_peel_bump:		0.03f,
+	glazing_edgefade_weight:		0.00f,
+	glazing_edgefade_randomness:	0.00f,
+	glazing_craquelure_weight:		0.00f,
+	drops_amount:					0.19f,
+	grout_brightness:				0.09f,
+	grout_height:					0.40f,
+	grout_scale:					0.52f,
+	tiles_bump_strength:			1.00f,
+	dirt_color:						color(0.0582f, 0.037f, 0.0265f),
+	dirt_weight:					0.0f,
+	texture_translate:				float2(0.0f),
+	texture_rotate:					0.00f,
+	texture_scale:					float2(1.00f),
+	tiles_rotate:					0.00f,
+	tiles_random_rotation:			360.00f,
+	tiles_scale:					1.00f,
+	tiles_random_scale:				0.25f,
+	glazing_varying_thickness_weight: 0.00f,
+	glazing_orangepeel_size:		0.05f,
+	glazing_orangepeel_noise_levels: 4,
+	grout_roughness:				0.8f,
+	grout_softness:					0.1f,
+	grout_bump_strength:			1.0f,
+	ao_amount:						0.85f,
+	uv_space_index:					0
+);
+
+
+
+
+ 
