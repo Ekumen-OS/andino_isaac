@@ -33,7 +33,7 @@ try:
 	simulation_app.update()
 	simulation_app.update()
 	while is_stage_loading():
-			simulation_app.update()
+		simulation_app.update()
 	world_settings = {"physics_dt": 1.0 / 60.0, "stage_units_in_meters": 1.0, "rendering_dt": 1.0 / 60.0}
 	world = World(**world_settings)
 	print("World loaded")
@@ -52,11 +52,11 @@ except FileNotFoundError:
 world.reset()
 
 while simulation_app.is_running():
-    world.step()
+	world.step()
 
-    # Deal with pause/stop
-    if world.is_playing():
-        if world.current_time_step_index == 0:
-            world.reset()
+	# Deal with pause/stop
+	if world.is_playing():
+		if world.current_time_step_index == 0:
+			world.reset()
 
 simulation_app.close()
