@@ -1,0 +1,414 @@
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2023 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+
+::base::texture_coordinate_info vmat_transform(
+								uniform float2 translation = float2(0.0, 0.0),
+								uniform float rotation	 = 0.0,
+								uniform float2 scaling	 = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space	   = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.			 ,  0. ,	 0.,
+			 0.			, 1.0 /scaling.y ,  0. ,	 0.,
+			 0.			, 0.			 ,  1.0,	 0.,
+			 translation.x , translation.y  ,  0.0,	 1.);
+
+	float s = ::math::sin(rotation_rad);
+	float c = ::math::cos(rotation_rad);
+	float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return ::base::transform_coordinate(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+float remap(float input, float low_1, float high_1, float low_2, float high_2)
+{
+	return low_2 + ((input - low_1) * (high_2 - low_2))/(high_1 - low_1);
+}
+
+float histogram_scan(float input, float width, float position)
+{	
+	float low = ::math::clamp(1.0f - position * 2.0, 0.0f ,1.0f);
+	float high = ::math::clamp(position > 0.5f ? 1.0 : 2.0f - 2 * position, 0.0f, 1.0f);
+	//float center = (low + high)/2.0f);
+	float offset = ((high - low) / 2.0) * width;
+	low += offset;
+	high -= offset;
+	return ::math::clamp(
+				remap(input,
+					low,
+					high,
+					0.0,
+					1.0),
+				0.0,
+				1.0);
+}
+
+
+float histogram_range(float input, float range, float position)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+
+
+float uint2float(int x)
+{
+	return float(x & 0x7FFFFFFF) + (x < 0 ? 2147483648.0 : 0.0);
+}
+
+int lowbias32(int x)
+{
+	x ^= x >>> 16;
+	x *= 0x7feb352d;
+	x ^= x >>> 15;
+	x *= 0x846ca68b;
+	x ^= x >>> 16;
+	return x;
+}
+
+float2 rnd22(int2 p) {
+	float2 ret_val = float2(
+		uint2float(lowbias32(p[0] + lowbias32(p[1]))) / 4294967296.f,
+		uint2float(lowbias32(p[0] + 32000 + lowbias32(p[1]))) / 4294967296.f
+	);
+	return ret_val;
+}	
+
+float3 srgb2rgb(float3 val)
+{
+	return ::math::pow(::math::max(val, float3(0.0f)), 2.2);
+}
+
+float2x2 invert_2x2(float2x2 M)
+{
+	float det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+	//https://www.chilimath.com/lessons/advanced-algebra/inverse-of-a-2x2-matrix/
+	return (1.0 / det) * float2x2(M[1][1], -M[0][1], -M[1][0], M[0][0]);
+}
+
+float3 nonrepeat_lookup(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5),
+	float patch_size = 8.0
+)
+{
+	
+	float2 uv_in = float2(uvw.position[0], uvw.position[1]) * texture_scale;
+	float Z =  patch_size;	 // patch scale inside example texture
+	float CON = 1.0f;
+	
+	float3 O = float3(0.f);
+	float2x2 M0 = float2x2(1.f,0.f, 0.5f, ::math::sqrt(3.f)/2.f);
+	float2x2 M = invert_2x2(M0); // transform matrix <-> tilted space
+	
+	float2 U = uv_in;
+	float2 V = M * uv_in; //pre-tilted hexa coordinates
+	int2 I = int2(::math::floor(V)); // hexa-tile id
+	
+	// The mean color needs to be determined in Photoshop then to make the
+	// average color work out, take the float value and calculate the apropriate
+	// mean value as (value^(1/2.2))
+
+	float3 m = average_color;
+	
+	float3 F = float3(::math::frac(V)[0], ::math::frac(V)[1], 0.f), W;
+	F[2] = 1.0 - F[0] - F[1]; // local hexa coordinates
+	
+	if( F[2] > 0.f )
+
+		O = (W[0] = F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I))) - m*float(CON))
+		  + (W[1] = F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0,1)))) - m*float(CON))
+		  + (W[2] = F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1,0)))) - m*float(CON));
+	else
+		O = (W[0] =	  -F[2]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1))))   - m*float(CON))
+		  + (W[1] = 1.f - F[1]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(1, 0)))) - m*float(CON))
+		  + (W[2] = 1.f - F[0]) * (( ::tex::lookup_float3(texture, U/Z-rnd22(I+int2(0, 1)))) - m*float(CON));
+	O = m + O/::math::length(W);
+	O = ::math::clamp( (O), 0.0, 1.0);
+	
+	return float3(O);
+}
+
+color endless_texture(
+	uniform texture_2d texture = texture_2d(),
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 10.0,
+	float3 average_color = float3(0.5, 0.5, 1.0),
+	float patch_size = 8.0,
+	bool gamma_correct_lookup = true
+)
+{
+	return gamma_correct_lookup ? color(srgb2rgb(
+			nonrepeat_lookup (
+				texture: texture,
+				uvw: uvw,
+				texture_scale: texture_scale,
+				average_color: average_color,
+				patch_size: patch_size
+			))
+		) : color(nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		));
+}
+
+float3 endless_normal(
+	uniform texture_2d texture = texture_2d(),
+	float factor = 1.0,
+	bool flip_tangent_u = false,
+	bool flip_tangent_v = false,
+	::base::texture_coordinate_info uvw = ::base::coordinate_source(),
+	float texture_scale = 1.0,
+	float3 average_color = float3(0.5, 0.5, 1.0),
+	float patch_size = 8.0
+)
+{
+	float3 transformed_tangent_u = flip_tangent_u ? uvw.tangent_u : - uvw.tangent_u;
+	float3 transformed_tangent_v = flip_tangent_v ? uvw.tangent_v : - uvw.tangent_v;
+	
+	if (flip_tangent_u)
+		transformed_tangent_u=-transformed_tangent_u;
+	if (flip_tangent_v)
+		transformed_tangent_v=-transformed_tangent_v;
+
+	// normalized Lookup
+	float3 tangent_space_normal =
+		 (nonrepeat_lookup (
+			texture: texture,
+			uvw: uvw,
+			texture_scale: texture_scale,
+			average_color: average_color,
+			patch_size: patch_size
+		) - 0.5) * (2.0 * factor);
+		
+	 return ::math::normalize(uvw.tangent_u * tangent_space_normal.x +
+		  uvw.tangent_v * tangent_space_normal.y +
+		  ::state::normal()*1.0); 
+}
+
+
+export material Concrete_Wall_Even(
+	uniform bool infinite_tiling = false [[
+		::anno::description("Enables infinite tiling feature which removes repeating texture patterns. Note that depending on the material this feature changes the appearance of the material slightly."),
+		::anno::display_name("Infinite Tiling"),
+		::anno::in_group("Appearance")
+	]],
+	color diffuse_tint = color(0.737205f) [[
+		::anno::description("Choose the color of the concrete wall"),
+		::anno::display_name("Diffuse Tint"),
+		::anno::in_group("Appearance")
+	]],
+	float diffuse_brightness = 0.65f [[
+		::anno::description("Adjusts the lightness of the diffuse color"),
+		::anno::display_name("Diffuse Brightness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float roughness = 0.62f [[
+		::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+		::anno::display_name("Roughness"),
+		::anno::in_group("Appearance"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	float dirt_layer_weight = 0.0f [[
+		::anno::description("Weight of the dirt layer"),
+		::anno::display_name("Dirt Amount"),
+		::anno::in_group("Appearance", "Dirt"),
+		::anno::hard_range(0.f, 1.f)
+	]],
+	color dirt_layer_color = color(0.6f, 0.6f, 0.6f) [[
+		::anno::description("Set the color of the dirt layer"),
+		::anno::display_name("Dirt Layer Color"),
+		::anno::in_group("Appearance", "Dirt")
+	]],
+	uniform float2 texture_translate = float2(0.f) [[
+		::anno::description("Controls the position of the texture"),
+		::anno::display_name("Texture Translate"),
+		::anno::in_group("Transform")
+	]],
+	uniform float texture_rotate = 0.f [[
+		::anno::description("Rotates angle of the texture in degrees"),
+		::anno::display_name("Texture Rotate"),
+		::anno::in_group("Transform"),
+		::anno::soft_range(0.f, 360.f)
+	]],
+	uniform float2 texture_scale = float2(1.f) [[
+		::anno::description("Larger numbers increase the size"),
+		::anno::display_name("Texture Scale"),
+		::nvidia::core_definitions::dimension(float2(1.5, 1.5)),
+		::anno::in_group("Transform")
+	]],
+	uniform bool roundcorners_enable = false [[
+		::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+		::anno::display_name("Enable Round Corners"),
+		::anno::in_group("Round Corners")
+	]],
+	uniform float roundcorners_radius_mm = 1.5f [[
+		::anno::description("Radius of the rounded corners in millimeters"),
+		::anno::display_name("Round Corner Radius (mm)"),
+		::anno::in_group("Round Corners"),
+		::anno::soft_range(0.f, 10.f)
+	]],
+	uniform bool roundcorners_across_materials = true [[
+		::anno::description("Applies the round corner effect across different materials when enabled"),
+		::anno::display_name("Across Materials"),
+		::anno::in_group("Round Corners")
+	]],
+	uniform int uv_space_index = 0 [[
+		::anno::description("Uses selected UV space for material"),
+		::anno::display_name("UV Space Index"),
+		::anno::in_group("Transform")
+	]]
+)
+[[
+	::anno::description("A flat concrete wall"),
+	::anno::in_group("Concrete"),
+	::anno::display_name("Concrete Wall Even - Rough"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Concrete_Wall_Even.Concrete_Wall_Even.png"),
+	::anno::key_words(string[]("concrete", "wall", "outdoor", "indoor", "even", "new", "construction", "gray")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]]
+ = 
+	let {
+		bool tmp0 = false;
+		material_surface tmp1(::df::custom_curve_layer(0.0299999993f, 1.f, 5.f, histogram_scan(float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[1], 0.919999957f, 0.109999999f), ::df::microfacet_ggx_smith_bsdf(histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] * dirt_layer_weight * 0.50999999f, 1.f, roughness * 0.25f + 0.649999976f) * histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] * dirt_layer_weight * 0.50999999f, 1.f, roughness * 0.25f + 0.649999976f), histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] * dirt_layer_weight * 0.50999999f, 1.f, roughness * 0.25f + 0.649999976f) * histogram_range(float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[0] + float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] * dirt_layer_weight * 0.50999999f, 1.f, roughness * 0.25f + 0.649999976f), color(1.f, 1.f, 1.f), ::state::texture_tangent_u(0), ::df::scatter_reflect), ::df::weighted_layer(1.f, ::df::diffuse_reflection_bsdf(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(nvidia::core_definitions::blend_colors(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_diff.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.55686301f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_diff.jpg", ::tex::gamma_srgb), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint, diffuse_tint, ::base::color_layer_overlay, 1.f).tint, dirt_layer_color, ::base::color_layer_multiply, float3(infinite_tiling ? endless_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.203922004f, 0.917647004f, 0.164706007f), 10.f, true) : ::base::file_texture(texture_2d("./textures/concrete_wall_even_R_rough_G_ao_B_grunge.jpg", ::tex::gamma_linear), color(0.f, 0.f, 0.f), color(1.f, 1.f, 1.f), ::base::mono_alpha, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false).tint)[2] * dirt_layer_weight).tint, color(0.f, 0.f, 0.f), ::base::color_layer_multiply, diffuse_brightness * -0.400000006f + 0.400000006f).tint, 0.f), bsdf(), infinite_tiling ? endless_normal(texture_2d("./textures/concrete_wall_even_norm.jpg", ::tex::gamma_linear), 1.f, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.498039007f, 0.498039007f, 0.996078014f), 10.f) : ::base::tangent_space_normal_texture(texture_2d("./textures/concrete_wall_even_norm.jpg", ::tex::gamma_linear), 1.f, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f)), infinite_tiling ? endless_normal(texture_2d("./textures/concrete_wall_even_norm.jpg", ::tex::gamma_linear), 1.f, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), 10.f, float3(0.498039007f, 0.498039007f, 0.996078014f), 10.f) : ::base::tangent_space_normal_texture(texture_2d("./textures/concrete_wall_even_norm.jpg", ::tex::gamma_linear), 1.f, false, false, vmat_transform(texture_translate, texture_rotate, texture_scale, ::base::texture_coordinate_uvw, uv_space_index), float2(0.f, 1.f), float2(0.f, 1.f), ::tex::wrap_repeat, ::tex::wrap_repeat, false, 1.f, 0.f)), material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		material_surface tmp2 = material_surface(scattering: bsdf(), emission: material_emission(emission: edf(), intensity: color(0.f, 0.f, 0.f), mode: intensity_radiant_exitance));
+		color tmp3 = color(1.f, 1.f, 1.f);
+		material_volume tmp4 = material_volume(scattering: vdf(), absorption_coefficient: color(0.f, 0.f, 0.f), scattering_coefficient: color(0.f, 0.f, 0.f));
+		material_geometry tmp5(float3(0.f), 1.f, roundcorners_enable ? ::state::rounded_corner_normal(roundcorners_radius_mm * 0.00100000005f, roundcorners_across_materials, 1.f) : ::state::normal());
+	} in
+		material(
+			thin_walled: tmp0,
+			surface: tmp1,
+			backface: tmp2,
+			ior: tmp3,
+			volume: tmp4,
+			geometry: tmp5);
+
+export material Concrete_Wall_Even_New_Shiny(*)
+[[
+	::anno::description("A flat concrete wall"),
+	::anno::in_group("Concrete"),
+	::anno::display_name("Concrete Wall Even - Shiny"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Concrete_Wall_Even.Concrete_Wall_Even_New_Shiny.png"),
+	::anno::key_words(string[]("concrete", "wall", "outdoor", "indoor", "even", "new", "shiny", "construction", "gray")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Concrete_Wall_Even
+(
+	infinite_tiling:		false,
+	diffuse_tint:			color(0.6f, 0.6f, 0.6f),	
+	diffuse_brightness:		.65f,
+	roughness:				.0f,
+	dirt_layer_weight:		0.0f,
+	dirt_layer_color:		color(0.420508f, 0.378676f, 0.348865f),
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	roundcorners_enable:	false,
+	roundcorners_radius_mm:	2.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:			0
+);
+
+
+
+export material Concrete_Wall_Even_Brownish_Dirty(*)
+[[
+	::anno::description("A flat concrete wall with a brownish dirt layer on top"),
+	::anno::in_group("Concrete"),
+	::anno::display_name("Concrete Wall Even - Dirty Brownish"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Concrete_Wall_Even.Concrete_Wall_Even_Brownish_Dirty.png"),
+	::anno::key_words(string[]("concrete", "wall", "outdoor", "indoor", "even", "dirt", "dirty", "grunge", "construction", "gray")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Concrete_Wall_Even
+(
+	infinite_tiling:		false,
+	diffuse_tint:			color(0.701170f, 0.645555f, 0.566810f),	
+	diffuse_brightness:		.65f,
+	roughness:				.65f,
+	dirt_layer_weight:		1.0f,
+	dirt_layer_color:		color(0.399293f, 0.358654f, 0.280124f),
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	roundcorners_enable:	false,
+	roundcorners_radius_mm:	2.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:			0
+);
+
+
+export material Concrete_Wall_Even_Greenish_Dirty(*)
+[[
+	::anno::description("A flat concrete wall"),
+	::anno::in_group("Concrete"),
+	::anno::display_name("Concrete Wall Even - Dirty Greenish"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::thumbnail("./.thumbs/Concrete_Wall_Even.Concrete_Wall_Even_Greenish_Dirty.png"),
+	::anno::key_words(string[]("concrete", "wall", "outdoor", "indoor", "even", "dirt", "dirty", "grunge", "construction", "gray")),
+	::anno::author("NVIDIA vMaterials"),
+	::anno::contributor("Ruediger Raab"),
+	::anno::contributor("Maik Rohland")
+]] = Concrete_Wall_Even
+(
+	infinite_tiling:		false,
+	diffuse_tint:			color(0.673049f, 0.701170f, 0.666117f),	
+	diffuse_brightness:		.65f,
+	roughness:				.65f,
+	dirt_layer_weight:		1.0f,
+	dirt_layer_color:		color(0.219520f, 0.271577f, 0.193972f),
+	texture_translate:		float2(0.0f),
+	texture_rotate:			0.0f,
+	texture_scale:			float2(1.0f),
+	roundcorners_enable:	false,
+	roundcorners_radius_mm:	2.5f,
+	roundcorners_across_materials:	false,
+	uv_space_index:			0
+);

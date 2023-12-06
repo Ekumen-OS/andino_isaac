@@ -1,0 +1,2880 @@
+/******************************************************************************
+ *     Copyright 2023 NVIDIA Corporation. All rights reserved.
+ ******************************************************************************
+ 
+Permission is hereby granted by NVIDIA Corporation ("NVIDIA"), free of charge,
+to any person obtaining a copy of the sample definition code that uses our 
+Material Definition Language (the "MDL Materials"), to reproduce and distribute
+the MDL Materials, including without limitation the rights to use, copy, merge,
+publish, distribute, and sell modified and unmodified copies of the MDL 
+Materials, and to permit persons to whom the MDL Materials is furnished to do
+so, in all cases solely for use with NVIDIA's Material Definition Language,
+subject to the following further conditions:
+
+1. The above copyright notices, this list of conditions, and the disclaimer
+that follows shall be retained in all copies of one or more of the MDL
+Materials, including in any software with which the MDL Materials are bundled,
+redistributed, and/or sold, and included either as stand-alone text files,
+human-readable headers or in the appropriate machine-readable metadata fields
+within text or binary files as long as those fields can be easily viewed by the
+user, as applicable.
+2. The name of NVIDIA shall not be used to promote, endorse or advertise any 
+Modified Version without specific prior written permission, except a) to comply
+ with the notice requirements otherwise contained herein; or b) to acknowledge
+the contribution(s) of NVIDIA.
+
+THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF COPYRIGHT, PATENT,
+TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR 
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY GENERAL, SPECIAL, 
+INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN AN ACTION OF 
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR INABILITY TO USE
+THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.
+*/
+
+
+mdl 1.5;
+
+import ::anno::*;
+import ::base::*;
+import ::df::*;
+import ::math::*;
+import ::state::*;
+import ::tex::*;
+import ::nvidia::core_definitions::blend_colors;
+import ::nvidia::core_definitions::dimension;
+
+
+const string COPYRIGHT = 
+" Copyright 2023 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+const string DESCRIPTION = "A wooden tile material with adjustments to produce a rich variety of wooden floor styles ranging from new to worn";
+
+
+// ----------------------------------------------------------------------------------------------------------------------
+
+
+float remap(float input, float low_1, float high_1, float low_2, float high_2)
+{
+	return low_2 + ((input - low_1) * (high_2 - low_2))/(high_1 - low_1);
+} 
+
+
+float histogram_range(float input, float range = 1.0f, float position = 0.5f)
+{	
+	float low = ::math::clamp(1.0 - ::math::min(((1.0 - position) + range * 0.5), (1.0 - position) * 2), 0.0, 1.0);
+	float high = ::math::clamp(::math::min((position + range * 0.5 ), position * 2.0), 0.0, 1.0);
+	return ::math::lerp(low, high, input);
+}
+
+float histogram_scan_big(float input, float width, float position)
+{
+	return ::math::clamp(
+				remap(input,
+					::math::lerp(-width, 1.0, position),
+					::math::lerp(0.0, 1.0 + width, position),
+					0.0,
+					1.0),
+				0.0,
+				1.0);
+}
+
+// ********** Randomization functions -I- **********
+
+int random(int seed = 0, int modulus = 65536, int multiplier = 1664525, int increment = 1013904223)
+{
+    return (multiplier * seed + increment) % modulus;
+}
+
+
+// Returns the normal n in tangent space, given n is in internal space.
+float3 transform_internal_to_tangent(float3 n)
+[[ 
+    ::anno::hidden() 
+]]
+{
+    return
+        n.x* float3(::state::texture_tangent_u(0).x,::state::texture_tangent_v(0).x,::state::normal().x)+
+        n.y* float3(::state::texture_tangent_u(0).y,::state::texture_tangent_v(0).y,::state::normal().y)+
+        n.z* float3(::state::texture_tangent_u(0).z,::state::texture_tangent_v(0).z,::state::normal().z);
+}
+
+// Returns the normal n in internal space, given n is in tangent space.
+float3 transform_tangent_to_internal(float3 n)
+[[ 
+    ::anno::hidden() 
+]]
+{
+    return  ::state::texture_tangent_u(0) * n.x +
+            ::state::texture_tangent_v(0) * n.y +
+            ::state::normal() * n.z ;
+} 
+
+
+
+// Returns a normal by adding a detail normal to a global normal.
+// If detail blending of two normal maps gives visual artifacts, check if texture_2d are loaded
+// correctly with ::tex::gamma_linear
+float3 add_detail_normal(float3 nd = ::state::normal(), float3 n = ::state::normal())
+{
+    // http://blog.selfshadow.com/publications/blending-in-detail/
+    float3 n_t = transform_internal_to_tangent(n);
+    float3 nd_t = transform_internal_to_tangent(nd);
+
+    n_t=n_t + float3(0.,0.,1.);
+    nd_t = nd_t *  float3(-1.,-1.,1.);
+
+    n = n_t*::math::dot(n_t, nd_t)/n_t.z - nd_t;
+    return ::math::normalize(transform_tangent_to_internal(n));
+}
+
+::base::texture_coordinate_info transform_coordinate_2(
+    float4x4 transform                                         
+        [[ ::anno::description("A transformation to be applied to the source coordinates. rotation_translation_scale() is a suggested means to compute the transformation matrix") ]],
+    ::base::texture_coordinate_info coordinate = ::base::texture_coordinate_info()
+        [[ ::anno::description("Coordinate, typically sourced from coordinate_source or coordinate_projection") ]]
+) [[ 
+    ::anno::description("Transform a texture coordinate by a matrix") ,
+    ::anno::noinline()
+  ]]
+{
+	// Version 2
+	float4 r_position = transform * float4(coordinate.position.x,coordinate.position.y,coordinate.position.z,1);
+
+	float4 u = transform[0];
+	float3 ru = ::math::normalize(float3(u.x,u.y,u.z));
+	float cos =  ru.x; 
+	float sin =  -ru.y;
+
+    return ::base::texture_coordinate_info(
+        float3(r_position.x,r_position.y,r_position.z),
+		::math::normalize(cos * coordinate.tangent_u - sin * coordinate.tangent_v),
+		::math::normalize(cos * coordinate.tangent_v + sin * coordinate.tangent_u));
+}
+
+
+// Takes the standard input that every material has. It combines a couple of
+// functions in one convenience function.
+::base::texture_coordinate_info vmat_transform(
+								float2 translation = float2(0.0, 0.0),
+								float rotation     = 0.0,				// rotation in degrees
+								float2 scaling     = float2(1.0, 1.0),
+								uniform ::base::texture_coordinate_system system = ::base::texture_coordinate_uvw,
+								uniform int uv_space       = 0
+)
+{
+	float rotation_rad = (rotation * 3.1415926535897932384626433832f) / 180.f;
+	float4x4 scale =
+	float4x4(1.0 /scaling.x, 0.             ,  0. ,     0.,
+			 0.            , 1.0 /scaling.y ,  0. ,     0.,
+			 0.            , 0.             ,  1.0,     0.,
+			 translation.x , translation.y  ,  0.0,     1.);
+
+    float s = ::math::sin(rotation_rad);
+    float c = ::math::cos(rotation_rad);
+    float4x4 rotate =
+	float4x4(  c  ,  -s   , 0.0 , 0.0,
+			   s  ,   c   , 0.0 , 0.0,
+			   0.0,   0.0 , 1.0 , 0.0,
+			   0. ,   0.0 , 0.0 , 1.);
+	
+	return transform_coordinate_2(scale*rotate, ::base::coordinate_source(system, uv_space));
+}
+
+
+// Returns 4 random IDs for a given pattern
+// TODO: Describe how the whole things exactly works
+float4 rand_tile_id(
+	::base::texture_coordinate_info uvw,
+	::base::texture_return id_offset_map	// map containing the ID in r channel
+											//and the cell offset in g channel.
+	)
+[[
+	::anno::noinline()
+]]
+{
+	float4 ret_val;
+	int offset_x, offset_y;	
+	
+	
+	float3 id_offset_map_2 = float3(id_offset_map.tint);
+	float offset_id = id_offset_map_2.y;
+	int rand_id = int(id_offset_map_2.x * 254.f); // the more logical value of 255 causes sometimes rendering artifacts
+												// with the random number generator. Setting it to 254 apparently fixes it
+	
+	// Offset of overlapping tiles stored in G-channel
+	// [0    - 0.25[ : ( 0/ 0)  Grayscale value: 0.1
+	// [0.25 - 0.5 [ : (-1/ 0)	Grayscale value: 0.37
+	// [0.5  - 0.75[ : (-1/-1)	Grayscale value: 0.62
+	// [0.75 - 1.0 [ : ( 0/-1)	Grayscale value: 0.87
+	
+	offset_x = offset_id < 0.25f ? 0 : (offset_id < .75f) ? 1 : 0;
+	offset_y = offset_id < 0.5 ? 0 : 1;
+	
+	int2 cell_id = int2(int(::math::floor(uvw.position.x) - offset_x), int(::math::floor(uvw.position.y) - offset_y));
+	
+	/* // ORIGINAL
+	int rand_val_1 = triple32(rand_id + triple32(cell_id.x + triple32(cell_id.y)));
+	int rand_val_2 = triple32(rand_val_1);
+	int rand_val_3 = triple32(rand_val_2);
+	int rand_val_4 = triple32(rand_val_3);
+	
+	ret_val = float4(uint2float(rand_val_1),
+					uint2float(rand_val_2),
+					uint2float(rand_val_3),
+					uint2float(rand_val_4));
+	
+	return float4(ret_val/4294967296.f);
+	*/ 
+	
+	/* Simplified Version */
+	int rand_val_1 = random(rand_id + random(cell_id.x + random(cell_id.y)));
+	int rand_val_2 = random(rand_val_1);
+	int rand_val_3 = random(rand_val_2);
+	int rand_val_4 = random(rand_val_3);
+	
+	ret_val = float4(rand_val_1, rand_val_2, rand_val_3, rand_val_4);
+	
+	return float4(ret_val/65535.0f);
+}
+
+
+// ******************************************************************************************************
+
+export material Wood_Tiles_Beech(
+    color wood_color = color(0.5f) [[
+        ::anno::display_name("Wood Color"),
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::in_group("Appearance")
+    ]],
+	float age_dirt = 0.3f [[
+        ::anno::display_name("Age Dirt"),
+        ::anno::description("Adds dark dirt spots on top of the surface to create the appearance of a somewhat aged surface"),
+        ::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	uniform float wood_bump_strength = 0.05f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.1f [[
+        ::anno::display_name("Wood Brightness Variation"),
+		::anno::description("Randomly darkens the tiles of the floor"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	float2 wood_scale = float2(.5f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+		::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+
+	
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.1f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.25f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.4f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]],
+	
+// WOOD Highlights (Not accessible to regular users)
+	uniform bool preview_wood_highlights = false
+	[[
+		::anno::display_name("Preview Wood Specular"),
+		::anno::description("Enables previewing of the wood specular highlights for tweaking"),
+		::anno::in_group("Advanced", "Wood Highlight")
+	]],	// just previews the highlights of the wood material
+    float isotropic_roughness			= 0.194f		// The average roughness value of the isotropic highlight. When roughness variation is applied, the variation will go above and below those values.")
+	[[
+		::anno::display_name("Isotropic Roughness"),
+		::anno::description("Sets the roughness of the isotropic component of the wood reflection"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+    float isotropic_roughness_range		= 0.648f	// Adjusts the range of variation being applied to the isotropic highlight, a value of zero has no effect at all whereas 1 produces the most variation")
+	[[
+		::anno::display_name("Isotropic Roughness Range"),
+		::anno::description("Sets the degree roughness variation around the isotropic highlight"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+    float isotropic_specular_brightness = 0.546f		// Sets how strong the isotropic specular highlight appears
+	[[
+		::anno::display_name("Isotropic Highlight Brightness"),
+		::anno::description("Sets the brightness of the isotropic wood highlight"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+    float wood_specular_level 			= 0.880f		// Adjusts the specular level (PBR Style)
+	[[
+		::anno::display_name("Wood Specular Level"),
+		::anno::description("Adjusts the falloff of the wood highlights"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+    float aniso_attenuation 			= 0.519f		//Attenuates the the anisotropic highlight using a texture. Use the preview for exclusively previewing the wood hightligghts for properly adjusting this term"
+	[[
+		::anno::display_name("Anisotropic Attenuation"),
+		::anno::description("Breaks up the reflection of the anisotropic highlight"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+    float aniso_bsdf_width				= 0.306f		//Controls the width of the anisotropic highlight"
+	[[
+		::anno::display_name("Anisotropic Width"),
+		::anno::description("Adjusts the width of the anisotropic wood highlight"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+    float aniso_bsdf_height				= 0.407f		//Controls the height of the anisotropic highlight"
+	[[
+		::anno::display_name("Anisotropic Height"),
+		::anno::description("Adjusts the height of the anisotropic highlight"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+    float anisotropic_isotropic_balance = 0.444f	// Balances the Anisotropic vs. the isotropic wood highlight"
+	[[
+		::anno::display_name("Anisotropic - Isotropic Balance"),
+		::anno::description("Blends between the contribution of isotropic and anisotropic highlight"),
+        ::anno::hard_range(0.f, 1.f),
+		::anno::in_group("Advanced", "Wood Highlight")
+    ]],
+	
+// TEXTURES (Not accessible to regular users)
+	uniform texture_2d tex_srgb_wood_color 					= texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb)				// Diffuse 
+	[[
+		::anno::display_name("Diffuse Wood Texture"),
+		::anno::description("The diffuse wood texture used to cover the tiles (srgb)"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+    uniform texture_2d tex_lin_wood_rough_detail 			= texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear)	// Anisotropic Roughness AKA "Rough Detail"
+	[[
+		::anno::display_name("Anisotropic Variation Texture"),
+		::anno::description("Texture to add variation to the anisotropic reflections of the wood (linear space)"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+    uniform texture_2d tex_lin_wood_rough_grain 			= texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear) 	// Isotropic Roughness AKA "Rough Grain"
+	[[
+		::anno::display_name("Isotropic Variation Texture"),
+		::anno::description("Texture to add variation to the isotropic reflections of the wood (linear space)"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+    uniform texture_2d tex_lin_wood_detail_norm 			= texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear)			// Wood detail Normal - Grain & Structure
+	[[
+		::anno::display_name("Wood Normal Texture"),
+		::anno::description("Tangent Space Normal texture for defining the bumpiness of the wood"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+    uniform texture_2d tex_lin_tiles_id_offset_rotation 	= texture_2d("./textures/brickbond_R_id_G_offs_B_rotation.png", ::tex::gamma_linear)	// Tiles ID, Offset & Rotation 
+	[[
+		::anno::display_name("Tiles ID - Offset - Rotation Texture"),
+		::anno::description("Texture that holds information about the wood tiles needed to create the wood tiles effect. R - Tiles ID, G - Tiles offset, B - Tiles Rotation (linear space)"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+    uniform texture_2d tex_lin_tiles_edgewear_gaps_gapsrough= texture_2d("./textures/brickbond_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear)	// Edgewear, Gaps(AO), Gaps Roughnesss
+	[[
+		::anno::display_name("Edgewear - Gaps - Gap Rough"),
+		::anno::description("Texture that holds maps for the edgewear roughness, the tile gaps and the gaps roughness (linear space)"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+    uniform texture_2d tex_lin_tiles_normal 				= texture_2d("./textures/brickbond_norm.png", ::tex::gamma_linear)		// Tiles Normal (Grout and Bend)
+	[[
+		::anno::display_name("Tiles Normal Texture"),
+		::anno::description("Texture that holds the normal map for the tiles (linear space)"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+	uniform texture_2d tex_lin_tiles_rough_dents_spots 		= texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear)	// Tiles Roughness, Dents and Spots
+	[[
+		::anno::display_name("Tiles Rough - Dents - Spots"),
+		::anno::description("Texture that contains maps for the tiles roughness, dents and spots which is a roughness effect applied to the wood coating layer (linear space)"),
+		::anno::in_group("Advanced", "Textures")
+	]],
+    uniform texture_2d tex_lin_tiles_orange_peel 			= texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear) 		// Tiles orange Peel
+	[[
+		::anno::display_name("Tiles Orange Peel"),
+		::anno::description("Tangent Space Normal texture for the orange peel which is applied to the coating of the tiles"),
+		::anno::in_group("Advanced", "Textures")
+	]]
+
+) 
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Brick Bond Master"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "brick bond", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech.png"),
+	::anno::copyright_notice(COPYRIGHT),
+	::anno::hidden()
+]]
+ = 
+    let {
+/*
+    texture_2d tex_srgb_wood_color 					= texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb);				// Diffuse 
+    texture_2d tex_lin_wood_rough_detail 			= texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear);	// Anisotropic Roughness AKA "Rough Detail"
+    texture_2d tex_lin_wood_rough_grain 			= texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear);  	// Isotropic Roughness AKA "Rough Grain"
+    texture_2d tex_lin_wood_detail_norm 			= texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear);			// Wood detail Normal - Grain & Structure
+    texture_2d tex_lin_tiles_id_offset_rotation 	= texture_2d("./textures/brickbond_R_id_G_offs_B_rotation.png", ::tex::gamma_linear);	// Tiles ID, Offset & Rotation 
+    texture_2d tex_lin_tiles_edgewear_gaps_gapsrough= texture_2d("./textures/brickbond_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear);	// Edgewear, Gaps(AO), Gaps Roughnesss
+    texture_2d tex_lin_tiles_normal 				= texture_2d("./textures/brickbond_norm.png", ::tex::gamma_linear);			// Tiles Normal (Grout and Bend)
+	texture_2d tex_lin_tiles_rough_dents_spots 		= texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear);	// Tiles Roughness, Dents and Spots
+    texture_2d tex_lin_tiles_orange_peel 			= texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear); 		// Tiles orange Peel
+*/	
+/*
+	// Wood Highlight tweaks
+	bool preview_wood_highlights		= false;	// just previews the highlights of the wood material
+    float wood_specular_level 			= 1.f;		// Adjusts the specular level (PBR Style)
+    float isotropic_specular_brightness = 1.0f;		// Sets how strong the isotropic specular highlight appears
+    float aniso_attenuation 			= 0.5f;		//Attenuates the the anisotropic highlight using a texture. Use the preview for exclusively previewing the wood hightligghts for properly adjusting this term"
+    float anisotropic_isotropic_balance = 0.467f;	// Balances the Anisotropic vs. the isotropic wood highlight"
+    float isotropic_roughness_range		= 0.66f;	// Adjusts the range of variation being applied to the isotropic highlight, a value of zero has no effect at all whereas 1 produces the most variation")
+    float isotropic_roughness			= 0.34f;	// The average roughness value of the isotropic highlight. When roughness variation is applied, the variation will go above and below those values."),
+
+    float aniso_bsdf_width				= 0.36f;	//Controls the width of the anisotropic highlight"
+    float aniso_bsdf_height				= 0.50f;	//Controls the height of the anisotropic highlight"),
+*/	
+
+	// Prepare the UV coordinates for regular texture lookups
+	::base::texture_coordinate_info base_uvw = vmat_transform(
+		translation:texture_translate,
+		rotation:	texture_rotate,
+		scaling:	texture_scale,
+		system:		::base::texture_coordinate_uvw,
+		uv_space:	uv_space_index
+	);
+
+
+	// Random tile transform
+	// R: tile_id
+	// G: tile_offset
+	// B: tile_rotation
+
+	::base::texture_return rand_id_offset_lookup = ::base::file_texture(
+		texture:		tex_lin_tiles_id_offset_rotation,
+		uvw:			base_uvw,
+		mono_source: 	::base::mono_alpha
+	);
+	
+	
+	float4 rand_vals = rand_tile_id(
+		uvw: 			base_uvw,
+		id_offset_map:	rand_id_offset_lookup
+	);
+	
+	float2 rand_translation = float2(rand_vals.x, rand_vals.y);
+	float rand_rotation		= (float3(rand_id_offset_lookup.tint).z + (rand_vals.z - 0.5) * wood_random_rotation) * 360;
+	float2 rand_scale		= float2(wood_scale/(1.0 - wood_scale_variation * 0.5 * rand_vals.x)) * texture_scale;
+	
+// *** TILE UV *** - The randomized UV lookup for the tiles
+	::base::texture_coordinate_info tile_uvw = vmat_transform(
+		translation:rand_translation,
+		rotation:	rand_rotation,
+		scaling:	rand_scale,
+		system:		::base::texture_coordinate_uvw,
+		uv_space:	uv_space_index
+	);
+	
+	
+	// Tiling Lookups and compositing
+	// R: Edgewear
+	// G: Gaps
+	// B: Gaps Damage Roughness
+	float3 egdewear_gaps_gapsrough_lookup = float3( ::base::file_texture(
+			texture:		tex_lin_tiles_edgewear_gaps_gapsrough,
+			uvw:			base_uvw,
+			mono_source: 	::base::mono_alpha
+		).tint);
+	
+	// R: Coat Base Roughness (Footsteps, Grain, Wipe)
+	// G: Dents (Dirt/Ao)
+	// B: Spots (Liquid-alike)
+	float3 rough_dents_spots_lookup = float3( ::base::file_texture(
+			texture:		tex_lin_tiles_rough_dents_spots,
+			uvw:			base_uvw,
+			mono_source: 	::base::mono_alpha
+		).tint);
+	
+	float dirt_and_spots_amount_remap = dirt_and_spots_amount * 0.5;
+	 
+	float coat_roughness = egdewear_gaps_gapsrough_lookup.x * edgewear_roughness_amount +  			// edgewear
+							egdewear_gaps_gapsrough_lookup.z * dirt_and_spots_amount_remap +		// Gaps Damage
+							histogram_range(rough_dents_spots_lookup.x, base_roughness_range, tiles_base_roughness) + // base roughness
+							rough_dents_spots_lookup.z * dirt_and_spots_amount + 				// Spots (rough)
+							(1.0 - rough_dents_spots_lookup.y) * dirt_and_spots_amount;	// Dents 
+							
+	float coat_roughness_squared = coat_roughness*coat_roughness; // roughness squared
+	
+	bsdf coating_bsdf = ::df::microfacet_ggx_smith_bsdf(
+		roughness_u: coat_roughness_squared,
+		roughness_v: coat_roughness_squared,
+		tint: color(1.0f),
+		mode:	::df::scatter_reflect
+	);
+	
+// ******** NORMALS ********
+
+	// Tiles normal
+	float3 tiles_normal = ::base::tangent_space_normal_texture(
+		texture:	tex_lin_tiles_normal,
+		factor:		tiles_bump_strength,
+		uvw:		base_uvw
+	);
+	
+	float3 wood_detail_normal = ::base::tangent_space_normal_texture(
+		texture:	tex_lin_wood_detail_norm,
+		factor:		wood_bump_strength,
+		uvw:		tile_uvw
+	);
+	
+	float3 orange_peel_normal = ::base::tangent_space_normal_texture(
+		texture:	tex_lin_tiles_orange_peel,
+		factor:		tiles_orange_peel_bump_factor * 0.1f,
+		uvw:		base_uvw
+	);
+	
+	// Randomized Tiles normals - This needs to be probably rotated with the normal of the uv-tiles
+	float slope_amount = 0.07 * tiles_random_slope_orientation;
+	float3 slope = ::math::normalize(
+			::state::texture_tangent_u(uv_space_index) * (rand_vals.y - 0.5) * slope_amount +
+			::state::texture_tangent_v(uv_space_index) * (rand_vals.z - 0.5) * slope_amount +
+			::state::normal() 							* ((1.0f - slope_amount) + 1.0f)
+	);
+	
+	float3 tiles_slope_normal = add_detail_normal(
+		n:  slope,
+		nd: tiles_normal
+	);
+	
+	float3 tiles_slope_detail_normal = add_detail_normal(
+		n:  tiles_slope_normal, 
+		nd: wood_detail_normal
+	);
+	
+	float3 normal_final = add_detail_normal(
+		n:  tiles_slope_detail_normal,
+		nd: orange_peel_normal
+	);
+	
+// ******** Anisotropic Highlight ********
+	// Lookup for anisotropic brightness variation
+	::base::texture_coordinate_info aniso_brightnessvar_lookup_uvw = vmat_transform(
+		translation:	texture_translate,
+		rotation:		texture_rotate,
+		scaling:		texture_scale * 0.6,
+		system: 		::base::texture_coordinate_uvw
+	);
+	
+	::base::texture_return aniso_brightnessvar_lookup = ::base::file_texture(
+		texture:		tex_lin_wood_rough_detail,
+		uvw:			aniso_brightnessvar_lookup_uvw,
+		mono_source: 	::base::mono_average
+	);
+	
+	float aniso_brightnessvar = histogram_scan_big(
+		input: aniso_brightnessvar_lookup.mono,
+		width: 0.911,
+		position: aniso_attenuation
+	);
+	
+	::base::texture_return aniso_mod_lookup = ::base::file_texture(
+		texture:		tex_lin_wood_rough_detail,
+		uvw:			tile_uvw,
+		mono_source: 	::base::mono_average
+	);
+	
+	float aniso_detail_u = histogram_range(aniso_mod_lookup.mono, 1.0, aniso_bsdf_width);
+	float aniso_detail_v = histogram_range(aniso_mod_lookup.mono, 1.0, aniso_bsdf_height);
+	
+	bsdf wood_highlight_aniso = ::df::weighted_layer(
+		layer: ::df::microfacet_ggx_smith_bsdf(
+					roughness_u:	aniso_detail_u * aniso_detail_u,
+					roughness_v:	aniso_detail_v * aniso_detail_v,
+					tint:			color(aniso_brightnessvar),
+					tangent_u:		tile_uvw.tangent_u,
+					mode:			::df::scatter_reflect
+				),
+		weight: 1.0f,
+		normal: tiles_slope_normal
+	);
+	
+// ******** Isotropic Highlight ********
+	::base::texture_return iso_mod_lookup = ::base::file_texture(
+		texture:		tex_lin_wood_rough_grain,
+		uvw:			tile_uvw,
+		mono_source: 	::base::mono_average
+	);
+	
+	float iso_mod = histogram_range(
+		input:		iso_mod_lookup.mono,
+		range:		isotropic_roughness_range,
+		position:	isotropic_roughness
+	);
+	
+	float iso_mod_squared = iso_mod * iso_mod;
+	
+	bsdf wood_highlight_isotropic = ::df::microfacet_ggx_smith_bsdf(
+										roughness_u: iso_mod_squared,
+										roughness_v: iso_mod_squared,
+										tint:		 color(isotropic_specular_brightness),
+										mode:		::df::scatter_reflect
+	);
+	
+// ******** Comping Anisotropic and Isotropic Highlight ********
+	
+	bsdf wood_highlight_isotropic_bumped = ::df::weighted_layer(
+		layer:	wood_highlight_isotropic,
+		base:	wood_highlight_aniso,
+		weight: anisotropic_isotropic_balance,
+		normal: tiles_slope_detail_normal
+	);
+
+	
+//  ******** Diffuse Comping ********
+
+	float floor_brightness_remap = ::math::lerp(
+		a: 0.3f,
+		b: 1.0f,
+		l: floor_brightness);
+
+	color diffuse_attenuation = ::math::lerp(
+		a: gaps_brightness,
+		b: floor_brightness_remap,
+		l: egdewear_gaps_gapsrough_lookup.y);
+	
+	::base::texture_return diffuse_lookup = ::base::file_texture(
+		texture:		tex_srgb_wood_color,
+		uvw:			tile_uvw,
+		mono_source: 	::base::mono_alpha,
+		color_scale:	diffuse_attenuation
+	);
+	
+	float rand_tile_brightness = ::math::lerp(
+									a:	::math::lerp(a: 1.0f,	// range of maximum wood brightness variation
+													b: 0.73,	/*max rand wood darkening */
+													l: wood_brightness_variation),  
+									b:	1.0f,
+									l: rand_vals.z	// random value
+	);
+	
+	// adding the darkening of the dents texture channel
+	float rand_tile_brightness_dents = rand_tile_brightness * ::math::lerp(1.0f, rough_dents_spots_lookup.y, age_dirt);
+	
+	
+	::base::texture_return tiles_rand_brightness = ::nvidia::core_definitions::blend_colors(
+		color_1:	diffuse_lookup.tint,
+		color_2:	color(::math::pow( a: rand_tile_brightness_dents, b: 2.2)),  // do gamma compensation
+		mode:		::base::color_layer_multiply,
+		weight: 1.0f
+	);
+	
+	::base::texture_return tiles_rand_brightness_tint = ::nvidia::core_definitions::blend_colors(
+		color_1:	tiles_rand_brightness.tint,
+		color_2:	wood_color,
+		mode:		::base::color_layer_overlay,
+		weight: 	.95f
+	);
+	
+	bsdf diffuse = ::df::weighted_layer(
+		layer:	::df::diffuse_reflection_bsdf(
+				tint: tiles_rand_brightness_tint.tint
+			),
+		normal: tiles_slope_detail_normal,
+		weight: 1.0
+	);
+	
+// Diffuse + Highlights BSDF
+
+	bsdf diffuse_and_highlights_bsdf = ::df::custom_curve_layer(
+		normal_reflectivity:	wood_specular_level * 0.08,
+		grazing_reflectivity: 	1.0f,
+		weight:					aniso_brightnessvar	,	
+		layer:					wood_highlight_isotropic_bumped,
+		base:					diffuse
+	);
+	
+// DEBUG
+	bsdf debug_diffuse_and_highlights_bsdf = ::df::custom_curve_layer(
+		normal_reflectivity:	wood_specular_level * 0.08,
+		grazing_reflectivity: 	1.0f,
+		weight:					aniso_brightnessvar	,	
+		layer:					wood_highlight_isotropic_bumped
+	);
+	
+// Coating Layer
+	// separate controls for the reflectivity of the gaps and the general reflectivity of the coat
+	// Note that "gaps_brightness" also controls the diffuse texture (saving an additional parameter here)
+	float coating_weight = ::math::lerp(
+		a:	gaps_brightness,
+		b:	coating_reflectivity,
+		l:	egdewear_gaps_gapsrough_lookup.y
+	);
+	
+	// apply the coating layer
+	bsdf coated_wood_tiles_bsdf = ::df::custom_curve_layer(
+		normal_reflectivity: 0.03,	//may as well be made adjustable (0.08 * specular_level)
+		grazing_reflectivity: 1.0f,
+		layer: coating_bsdf,
+		weight: coating_weight,
+		base: diffuse_and_highlights_bsdf,
+		normal: normal_final
+	);
+	
+	
+// ******** Round Corners ********
+	float3 round_normal = round_corners ? 
+		::state::rounded_corner_normal(
+			radius: roundcorner_radius_mm * 0.001,  // is in mm
+			across_materials:	across_materials
+		) 	: ::state::normal();
+	
+} in material(
+	surface: material_surface(
+		scattering: preview_wood_highlights ? debug_diffuse_and_highlights_bsdf : coated_wood_tiles_bsdf
+	),
+	geometry: material_geometry(
+		normal: round_normal
+	)
+);
+
+
+// ******************************************************************************************************
+// 01
+
+export material Wood_Tiles_Beech_Brickbond(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Brick Bond"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "brick bond", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Brickbond.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/brickbond_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/brickbond_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/brickbond_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+
+// ******************************************************************************************************
+// 02
+
+export material Wood_Tiles_Beech_Chantilly(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Chantilly"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "brick bond", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Chantilly.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/chantilly_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/chantilly_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/chantilly_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+// ******************************************************************************************************
+// 03
+
+export material Wood_Tiles_Beech_Chevron(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Chevron"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "chevron", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Chevron.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/chevron_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/chevron_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/chevron_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+
+// ******************************************************************************************************
+// 04
+
+export material Wood_Tiles_Beech_Cubes(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Cubes"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "cubes", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Cubes.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/cubes_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/cubes_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/cubes_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+
+// ******************************************************************************************************
+// 05
+
+export material Wood_Tiles_Beech_Diagonal(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Diagonal"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "diagonal", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Diagonal.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/diagonal_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/diagonal_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/diagonal_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+
+// ******************************************************************************************************
+// 06
+
+export material Wood_Tiles_Beech_Herringbone(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Herringbone"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "herringbone", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Herringbone.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/herringbone_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/herringbone_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/herringbone_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+
+// ******************************************************************************************************
+// 07
+
+export material Wood_Tiles_Beech_Mosaic(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+) 
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Mosaic"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "mosaic", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Mosaic.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/mosaic_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/mosaic_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/mosaic_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+// ******************************************************************************************************
+// 08
+
+export material Wood_Tiles_Beech_Stackbond(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Stack Bond"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "stack bond", "stack", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Stackbond.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/stackbond_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/stackbond_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/stackbond_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+
+// ******************************************************************************************************
+// 09
+
+export material Wood_Tiles_Beech_Versailles(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+) 
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Versailles"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "versailles", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Versailles.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/versailles_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/versailles_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/versailles_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);
+
+
+// ******************************************************************************************************
+// 10
+
+export material Wood_Tiles_Beech_Woodstrip(
+    color wood_color = color(0.5f) [[
+        ::anno::description("Applies an overlay color to tint the wood. The color is used using the 'overlay' mode as known "
+		"from paint programs. A gray value of 0.5 has no effect, brighter values brighten it while darker colors will have a darkening effect. "),
+        ::anno::display_name("Wood Color"),
+        ::anno::in_group("Appearance")
+    ]],
+	uniform float wood_bump_strength = 0.2f // Determines the degree of bumpiness"),
+	[[
+		::anno::display_name("Wood Bump Strength"),
+		::anno::description("Adjusts the strength of the wood bump map"),
+		::anno::in_group("Appearance"),
+        ::anno::hard_range(0.f, 2.f)
+    ]],	
+    float floor_brightness = 0.5f [[
+        ::anno::description("Adjusts the general brightness of the wood "),
+        ::anno::display_name("Floor Brightness"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float wood_brightness_variation = 0.5f [[
+        ::anno::display_name("Wood Brightness Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	    float wood_random_rotation = 0.03f [[
+        ::anno::display_name("Wood Random Rotation"),
+        ::anno::description("Adds a random rotation around the main wood tile alignment direction"),
+        ::anno::in_group("Tiles"),
+		::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	    float2 wood_scale = float2(1.f) [[
+        ::anno::description("Sets the size of the wood relative to the tiles pattern. Larger numbers increase the size of the wood texture within the tiles"),
+        ::anno::display_name("Wood Scale"),
+        ::anno::in_group("Tiles")
+    ]],
+	float wood_scale_variation = 0.f [[
+        ::anno::description("Adds random variation to size of the wood in each tile"),
+        ::anno::display_name("Wood Scale Variation"),
+        ::anno::in_group("Tiles"),
+		::anno::soft_range(0.f, 2.f)
+    ]],
+    uniform float tiles_bump_strength = 0.4f [[
+        ::anno::description("Determines the degree of bumpiness of the tiles texture (grooves and bent tiles)"),
+        ::anno::display_name("Tiles Bump Strength"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	    float tiles_random_slope_orientation = 0.05f [[
+        ::anno::display_name("Tiles Random Slope Orientation"),
+		::anno::description("Makes tiles individual tiles to appear tilted in random directions. Good for old floors and to take away too perfect appearing tiled floors."),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float gaps_brightness = 0.3f [[
+        ::anno::display_name("Gaps Brightness"),
+        ::anno::description("Adjusts the brightness and roughness of the gaps between the tiles"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    uniform float tiles_orange_peel_bump_factor = 0.0f [[
+        ::anno::display_name("Coating Unevenness"),
+		::anno::description("Applies a slight orange peel effect to the clear coat layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float coating_reflectivity = 1.f [[
+        ::anno::display_name("Coating Reflectivity"),
+		::anno::description("The overall reflectivity of the clearcoat/finish layer"),
+        ::anno::in_group("Tiles"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	
+    float tiles_base_roughness = 0.04f [[
+        ::anno::description("Adjusts the base roughness of the tiles, higher value leading to blurrier and softer reflections"),
+        ::anno::display_name("Coating Roughness"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float base_roughness_range = 0.6f [[
+        ::anno::description("Amount of variation being applied to the base roughness, introducing signs of wear such as footprints and smudges"),
+        ::anno::display_name("Coating Roughness Variation"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float dirt_and_spots_amount = 0.0f [[
+        ::anno::description("Adds random dirt and spots on top of the surface"),
+        ::anno::display_name("Dirt and Spots"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+    float edgewear_roughness_amount = 0.0f [[
+        ::anno::description("Adds edgewear around the tile borders which results in a more worn and rough look"),
+        ::anno::display_name("Edgewear Roughness Amount"),
+        ::anno::in_group("Tiles", "Roughness"),
+        ::anno::hard_range(0.f, 1.f)
+    ]],
+	
+	//-----------------------------------------------
+	
+    float2 texture_translate = float2(0.f) [[
+        ::anno::display_name("Texture Translate"),
+        ::anno::description("Controls the position of the texture"),
+        ::anno::in_group("Transform")
+    ]],
+    float texture_rotate = 0.f [[
+        ::anno::display_name("Texture Rotate"),
+        ::anno::description("Rotates angle of the texture in degrees"),
+        ::anno::in_group("Transform")
+    ]],
+    float2 texture_scale = float2(1.0f) [[
+        ::anno::display_name("Texture Scale"),
+        ::anno::description("Larger numbers increase the size"),
+        ::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform int uv_space_index = 0 [[
+        ::anno::display_name("UV Space Index"),
+        ::anno::description("Uses selected UV space for material"),
+        ::anno::in_group("Transform")
+    ]],
+    uniform bool round_corners = false [[
+        ::anno::display_name("Round Corners"),
+        ::anno::description("Enables the round cornwer effect. Comes at a slight performance cost as additional raytracing calls are rquired to evaluate the round corner effect"),
+        ::anno::in_group("Round Corners")
+    ]],
+    uniform float roundcorner_radius_mm = 1.5f [[
+        ::anno::display_name("Radius (mm)"),
+        ::anno::description("Radius of the rounded corners in millimeters"),
+        ::anno::in_group("Round Corners"),
+        ::anno::soft_range(0.f, 10.f)
+    ]],
+    uniform bool across_materials = false [[
+        ::anno::display_name("Across Materials"),
+        ::anno::description("Applies the round corner effect across different materials when enabled"),
+        ::anno::in_group("Round Corners")
+    ]]
+)
+[[
+	::anno::author("NVIDIA vMaterials"),
+    ::anno::display_name("Wood Tiles Beech - Wood Strip"),
+    ::anno::description(DESCRIPTION),
+	// reflective, varnished, bumped, matte, natural, stained, exterior, new, aged, decayed, abstract, modern, classic
+	::anno::key_words(string[]("wood", "master", "beech", "tiles", "tiled", "pattern", "decorative", "multimaterial", "organic", "natural", "coated", "infinite tiling", "architecture", "strip", "interior")), 
+	::anno::thumbnail("./.thumbs/Wood_Tiles_Beech.Wood_Tiles_Beech_Woodstrip.png"),
+	::anno::copyright_notice(COPYRIGHT)
+]] = Wood_Tiles_Beech(
+	wood_color:						wood_color,
+	wood_bump_strength:				wood_bump_strength,
+	floor_brightness:				floor_brightness,
+	wood_brightness_variation:		wood_brightness_variation,
+	wood_random_rotation:			wood_random_rotation,
+	wood_scale:						wood_scale,
+	wood_scale_variation:			wood_scale_variation,
+	
+	tiles_bump_strength: 			tiles_bump_strength,
+	tiles_random_slope_orientation: tiles_random_slope_orientation,
+	gaps_brightness: 				gaps_brightness,
+	tiles_orange_peel_bump_factor:	tiles_orange_peel_bump_factor,
+	coating_reflectivity:			coating_reflectivity,
+	tiles_base_roughness:			tiles_base_roughness,
+	base_roughness_range:			base_roughness_range,
+	dirt_and_spots_amount:			dirt_and_spots_amount,
+	edgewear_roughness_amount:		edgewear_roughness_amount,
+	
+	texture_translate:				texture_translate,
+	texture_rotate:					texture_rotate,
+	texture_scale:					texture_scale,
+	uv_space_index:					uv_space_index,
+	
+	round_corners:					round_corners,
+	roundcorner_radius_mm:			roundcorner_radius_mm,
+	across_materials:				across_materials,
+	
+	preview_wood_highlights:		false,
+	isotropic_roughness:			0.194f,
+	isotropic_roughness_range:		0.648f,
+	isotropic_specular_brightness:	0.546f,
+	wood_specular_level:			0.880f,
+	aniso_attenuation:				0.519f,
+	aniso_bsdf_width:				0.306f,
+	aniso_bsdf_height:				0.407f,
+	anisotropic_isotropic_balance:	0.444f,
+	
+	tex_srgb_wood_color:					texture_2d("./textures/beech_diff.jpg", ::tex::gamma_srgb),
+	tex_lin_wood_rough_detail:				texture_2d("./textures/beech_rough_detail.jpg", ::tex::gamma_linear),
+	tex_lin_wood_rough_grain:				texture_2d("./textures/beech_rough_grain.jpg", ::tex::gamma_linear), 
+	tex_lin_wood_detail_norm:				texture_2d("./textures/beech_norm.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_id_offset_rotation:		texture_2d("./textures/woodstrip_R_id_G_offs_B_rotation.png", ::tex::gamma_linear),
+	tex_lin_tiles_edgewear_gaps_gapsrough:	texture_2d("./textures/woodstrip_R_edgewear_G_gaps_B_gaps_rough.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_normal:					texture_2d("./textures/woodstrip_norm.png", ::tex::gamma_linear),
+	tex_lin_tiles_rough_dents_spots:		texture_2d("./textures/tiles_wood_R_rough_G_dents_B_spots.jpg", ::tex::gamma_linear),
+	tex_lin_tiles_orange_peel:				texture_2d("./textures/tiles_wood_orangepeel_norm.jpg", ::tex::gamma_linear)
+	
+);

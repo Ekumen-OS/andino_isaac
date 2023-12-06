@@ -1,0 +1,1370 @@
+/*****************************************************************************
+*     Copyright 2023 NVIDIA Corporation. All rights reserved.
+******************************************************************************
+
+ MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,
+ WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR, 
+ THE MDL MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF 
+ COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA
+ CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING
+ ANY GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, 
+ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF 
+ THE USE OR INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN 
+ THE MDL MATERIALS.
+*/
+
+mdl 1.4;
+
+import ::anno::*;
+import ::nvidia::core_definitions::flex_material_v2;
+import ::nvidia::core_definitions::perlin_noise_bump_texture;
+import ::state::normal;
+import ::nvidia::core_definitions::dimension;
+
+const string COPYRIGHT = 
+" Copyright 2023 NVIDIA Corporation. All rights reserved.\n"
+" MDL MATERIALS ARE PROVIDED PURSUANT TO AN END USER LICENSE  AGREEMENT,\n"
+" WHICH WAS ACCEPTED IN ORDER TO GAIN ACCESS TO THIS FILE.  IN PARTICULAR,\n" 
+" THE MDL MATERIALS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n"
+" EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF\n"
+" MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\n" 
+" COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL NVIDIA\n"
+" CORPORATION BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, INCLUDING ANY\n"
+" GENERAL, SPECIAL,  INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, WHETHER IN\n"
+" AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF THE USE OR\n"
+" INABILITY TO USE THE MDL MATERIALS OR FROM OTHER DEALINGS IN THE MDL MATERIALS.\n";
+
+/* AEC Flat Paint */
+
+
+export material Paint_Eggshell(
+    color base_color =  color (0.590619, 0.715694, 0.644480)
+    [[
+		::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0f, 1.0f),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(float2(1.0f, 1.0f)),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0f, 4.0f),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+		::anno::display_name("Eggshell Paint - Aqua"),
+		::anno::description("An eggshell paint for walls and other surfaces"),
+		::anno::author("NVIDIA vMaterials"),
+		::anno::key_words(string[]("aec", "paint", "pastel", "eggshell", "interior", "aqua", "blue", "light", "cool")),
+		::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell.png"),
+		::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Teal(
+    color base_color =  color (0.270498, 0.644480, 0.623960)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Teal"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "pastel", "teal", "blue", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Teal.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Lime(
+    color base_color =  color (0.723055, 0.791298, 0.412543)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Lime"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "pastel", "lime", "green", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Lime.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Leaf(
+    color base_color =  color (0.351533, 0.428690, 0.287441)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Leaf"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "pastel", "eggshell", "interior", "leaf", "green", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Leaf.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Light_Denim(
+    color base_color =  color (0.124772, 0.238398, 0.323143)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Light Denim"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "denim", "blue", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Light_Denim.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Denim(
+    color base_color =  color (0.061246, 0.109462, 0.168269)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Denim"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "denim", "blue")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Denim.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Peach(
+    color base_color =  color (0.973445, 0.822786, 0.715694)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Peach"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "pastel", "peach", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Peach.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Pale_Rose(
+    color base_color =  color (0.806952, 0.577580, 0.545724)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Pale Rose"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "pastel", "rose", "pale", "light", "warm")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Pale_Rose.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Burnt_Red(
+    color base_color =  color (0.577580, 0.102242, 0.070360)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Burnt Red"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "red", "burnt", "warm")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Burnt_Red.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Copper(
+    color base_color =  color (0.462077, 0.124772, 0.052861)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Copper"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "copper", "brown", "warm")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Copper.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Sunny(
+    color base_color =  color (0.715694, 0.376262, 0.012983)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Sunny"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "sunny", "warm", "yellow")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Sunny.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Nude(
+    color base_color =  color (0.791298, 0.456411, 0.230740)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Nude"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "pastel", "eggshell", "interior", "nude", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Nude.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Camel(
+    color base_color =  color (0.456411, 0.351533, 0.223228)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Camel"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "camel", "sand", "brown")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Camel.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Vanilla(
+    color base_color =  color (0.814847, 0.783538, 0.603827)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Vanilla"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "pastel", "vanilla", "yellow", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Vanilla.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Taupe(
+    color base_color =  color (0.246201, 0.194618, 0.158961)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Taupe"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "taupe", "brown", "gray")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Taupe.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Cashmere(
+    color base_color =  color (0.644480, 0.603827, 0.564712)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Cashmere"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "pastel", "eggshell", "interior", "cashmere", "light", "white", "gray")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Cashmere.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Ash(
+    color base_color =  color (0.127438, 0.132868, 0.124772)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Ash"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "ash", "dark", "gray")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Ash.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_Earth(
+    color base_color =  color (0.149960, 0.066626, 0.016807)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - Earth"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "eggshell", "interior", "earth", "brown", "dark")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_Earth.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
+
+export material Paint_Eggshell_White(
+    color base_color =  color (0.9658157, 0.907549, 0.8277255)
+    [[
+        ::anno::display_name("Color"),
+        ::anno::description("Choose the color of the paint."),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float bump_strength =  1.f
+    [[
+        ::anno::display_name("Bump Strength"),
+        ::anno::description("Specifies the strength of the bump."),
+        ::anno::in_group("Appearance")
+    ]],
+    float reflection_roughness =  0.6f
+    [[
+        ::anno::display_name("Finish Roughness"),
+        ::anno::description("Higher roughness values lead to bigger highlights and blurrier reflections."),
+        ::anno::hard_range(0.0,1.0),
+        ::anno::in_group("Appearance")
+    ]],
+    uniform float texture_scale = 1.f
+    [[
+        ::anno::display_name("Scale"),
+        ::anno::description("Larger numbers increase the texture size."),
+		::nvidia::core_definitions::dimension(1.0f),
+        ::anno::in_group("Transform")
+    ]],
+    uniform float ior =  1.4f
+    [[
+        ::anno::display_name("IOR"),
+        ::anno::description("Index of refraction."),
+        ::anno::soft_range(1.0,4.0),
+        ::anno::in_group("Advanced")
+    ]])
+[[
+	::anno::display_name("Eggshell Paint - White"),
+    ::anno::description("An eggshell paint for walls and other surfaces"),
+    ::anno::author("NVIDIA vMaterials"),
+	::anno::key_words(string[]("aec", "paint", "pastel", "eggshell", "interior", "white", "light")),
+	::anno::thumbnail("./.thumbs/Paint_Eggshell.Paint_Eggshell_White.png"),
+    ::anno::copyright_notice(COPYRIGHT)
+]]= 
+::nvidia::core_definitions::flex_material_v2(  
+    base_color:  base_color,
+    diffuse_roughness:  0.f,
+    is_metal:  false,
+    reflectivity:  0.8f,
+    reflection_roughness:  reflection_roughness,
+    anisotropy:  0.f,
+    anisotropy_rotation:  0.f,
+    transparency:  0.f,
+    transmission_color:  color ( 1.f , 1.f , 1.f),
+    volume_color:  color ( 1.f , 1.f , 1.f),
+    transmission_roughness:  0.f,
+    base_thickness:  0.1f,
+    ior:  ior,
+    thin_walled:  false,
+    normal:  ::nvidia::core_definitions::perlin_noise_bump_texture(
+        factor:  bump_strength* 0.75f,
+        scaling:  (1.f/texture_scale) *  float3 ( 3000.f , 3000.f , 3000.f),
+        noise_levels:  1,
+        object_space:  true,
+        absolute_noise:  false,
+        noise_threshold_high:  1.f,
+        noise_threshold_low:  0.f,
+        translation:  float3 ( 0.f),
+        rotation:  float3 ( 0.f),
+        texture_space:  0));
+
