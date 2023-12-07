@@ -1,28 +1,44 @@
-# andino_isaac
+# :green_heart: Andino simulation in Nvidia Isaac
 
-## Requirements
-- A docker environment is yet to be implemented, so it can only be run locally
-- ROS2 Humble
-- Tested with Isaac Sim 2022.2.1 and 2023.1.0
+This package provides a simulation environment for [Andino](https://github.com/Ekumen-OS/andino) in [Nvidia's Isaac sim](https://www.nvidia.com/en-us/deep-learning-ai/industries/robotics/) integrated with ROS 2.
 
-## Usage
+## :clamp: Platforms
 
-1. Launch Isaac Sim
+- ROS 2: Humble Hawksbill
+- OS:
+  - Ubuntu 22.04 Jammy Jellyfish
+- Isaac Sim 2023.1.0
 
-2. One time setup, skip if already done:
-  - In the w
-  - Enable ROS 2 Bridge extension
+## :inbox_tray: Installation
 
-3. Open USDA andino description.
+Clone this repository into the src folder of a ROS2 workspace
 
-4. Launch ROS 2 andino_description
+```
+git clone https://github.com/ekumenlabs/andino_isaac.git
+```
 
-  ```
-  ros2 launch andino_description andino_description.launch.py
-  ```
+## :package: Build
 
-5. Play the simulation
+The package contains some dependencies that must be installed in order to build it:
 
-6. Enjoy!:
+```
+rosdep install --from-paths src -i -y
+```
+
+Then build the package and source the install workspace. To do so run the following commands:
+
+```sh
+colcon build
+source install/setup.bash
+```
+
+## :rocket: Usage
+
+Launch the simulation with the provided launchfile
+
+```
+ros2 launch andino_isaac andino_isaac.launch.py
+```
+
+2. Enjoy!:
   - Teleop the robot
-  - Launch rviz and see TF
