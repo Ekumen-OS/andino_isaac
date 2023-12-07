@@ -40,5 +40,4 @@ Launch the simulation with the provided launchfile
 ros2 launch andino_isaac andino_isaac.launch.py
 ```
 
-2. Enjoy!:
-  - Teleop the robot
+Enjoy!
