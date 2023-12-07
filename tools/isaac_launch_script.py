@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser("Simulation loader argument parser")
 parser.add_argument("--world_file", required=True, help="Full path to the world file")
 parser.add_argument("--robot_file", help="Full path to the robot file")
 parser.add_argument("--headless", default="False", help="Run stage headless")
-parser.add_argument("--renderer", default="RayTracedLighting", choices=["RayTracedLighting", "PathTracing"], help="Run stage headless")
+parser.add_argument("--renderer", default="RayTracedLighting", choices=["RayTracedLighting", "PathTracing"], help="Renderer to use")
 args, unknown = parser.parse_known_args()
 
 # Start the omniverse application
