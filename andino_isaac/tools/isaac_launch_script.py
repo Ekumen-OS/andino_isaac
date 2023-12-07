@@ -9,9 +9,14 @@ CONFIG = {"width": 1280, "height": 720, "sync_loads": True, "headless": False, "
 parser = argparse.ArgumentParser("Simulation loader argument parser")
 parser.add_argument("--world_file", help="Full path to the world file")
 parser.add_argument("--robot_file", help="Full path to the robot file")
+parser.add_argument("--headless", default="False", help="Run stage headless")
+parser.add_argument("--renderer", default="RayTracedLighting", help="Run stage headless")
 args, unknown = parser.parse_known_args()
 
 # Start the omniverse application
+if "True" in args.headless:
+	CONFIG["headless"] = True
+CONFIG["renderer"] = args.renderer
 simulation_app = SimulationApp(launch_config=CONFIG)
 
 # Now that the simulation app is open, continue to load the extension, world and robot
