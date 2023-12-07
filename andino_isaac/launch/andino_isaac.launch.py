@@ -5,6 +5,16 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, ExecuteProcess
 from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
 
+def search_isaac_install_path():
+    ISAAC_VERSION = "isaac_sim-2023.1.0"
+    user_home_path = os.path.expanduser("~")
+    isaac_install_path = ""
+    for dirpath, dirnames, _ in os.walk(user_home_path):
+        for dirname in dirnames:
+            if dirname == ISAAC_VERSION:
+                isaac_install_path = os.path.join(dirpath, ISAAC_VERSION)
+    return isaac_install_path
+
 def generate_launch_description():
     # Arguments
     world_name = DeclareLaunchArgument(
@@ -35,8 +45,8 @@ def generate_launch_description():
 
     # Paths to places
     pkg_andino_isaac_path = get_package_share_directory('andino_isaac')
-    user_home_path = os.path.expanduser("~")
-    isaac_install_path = os.path.join(user_home_path, ".local/share/ov/pkg/isaac_sim-2023.1.0")
+    # Look for the omniverse install path
+    isaac_install_path = search_isaac_install_path()
     isaac_python_launcher_path = os.path.join(isaac_install_path, "python.sh")
     isaac_custom_launch_script = os.path.join(pkg_andino_isaac_path, "tools", "isaac_launch_script.py")
     full_path_to_world = PathJoinSubstitution([pkg_andino_isaac_path, 'isaac_worlds', LaunchConfiguration('world_name')])
@@ -44,7 +54,7 @@ def generate_launch_description():
 
     # Environment variables
     prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
-    ld_library_path_env_var = prev_ld_library_path + ":" + user_home_path + "/.local/share/ov/pkg/isaac_sim-2023.1.0/exts/omni.isaac.ros2_bridge/humble/lib"
+    ld_library_path_env_var = prev_ld_library_path + ":" + isaac_install_path + "/exts/omni.isaac.ros2_bridge/humble/lib"
     rmw_implementation_env_var = 'rmw_fastrtps_cpp'
 
     return LaunchDescription([
