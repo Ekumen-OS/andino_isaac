@@ -16,33 +16,6 @@ def search_isaac_install_path():
     return isaac_install_path
 
 def generate_launch_description():
-    # Arguments
-    world_name = DeclareLaunchArgument(
-        'world_name',
-        default_value='plain_world.usda',
-        description='Name of the world to launch',
-    )
-    robot_name = DeclareLaunchArgument(
-        'robot_name',
-        default_value='andino.usda',
-        description='Name of the robot to spawn',
-    )
-    headless = DeclareLaunchArgument(
-        'headless',
-        default_value='False',
-        description='Run Isaac sim headless',
-    )
-    renderer = DeclareLaunchArgument(
-        'renderer',
-        default_value='RayTracedLighting',
-        description='Renderer to use, either RayTracedLighting or PathTracedLighting',
-    )
-    verbose = DeclareLaunchArgument(
-        'verbose',
-        default_value='True',
-        description='Show Isaac sim output',
-    )
-
     # Paths to places
     pkg_andino_isaac_path = get_package_share_directory('andino_isaac')
     # Look for the omniverse install path
@@ -56,6 +29,36 @@ def generate_launch_description():
     prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
     ld_library_path_env_var = prev_ld_library_path + ":" + isaac_install_path + "/exts/omni.isaac.ros2_bridge/humble/lib"
     rmw_implementation_env_var = 'rmw_fastrtps_cpp'
+
+    # Arguments
+    world_name = DeclareLaunchArgument(
+        'world_name',
+        default_value='plain_world.usda',
+        description='Name of the world to launch',
+        choices=[world for world in os.listdir(os.path.join(pkg_andino_isaac_path, 'isaac_worlds')) if world.endswith(('.usd', '.usda'))]
+    )
+    robot_name = DeclareLaunchArgument(
+        'robot_name',
+        default_value='andino.usda',
+        description='Name of the robot to spawn',
+        choices=[robot for robot in os.listdir(os.path.join(pkg_andino_isaac_path, 'andino_isaac_description')) if robot.endswith(('.usd', '.usda'))]
+    )
+    headless = DeclareLaunchArgument(
+        'headless',
+        default_value='False',
+        description='Run Isaac sim headless',
+    )
+    renderer = DeclareLaunchArgument(
+        'renderer',
+        default_value='RayTracedLighting',
+        description='Renderer to use',
+        choices=["RayTracedLighting", "PathTracing"]
+    )
+    verbose = DeclareLaunchArgument(
+        'verbose',
+        default_value='True',
+        description='Show Isaac sim output',
+    )
 
     return LaunchDescription([
         SetEnvironmentVariable(name='RMW_IMPLEMENTATION', value=rmw_implementation_env_var),
