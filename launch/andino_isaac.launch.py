@@ -61,8 +61,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        SetEnvironmentVariable(name='RMW_IMPLEMENTATION', value=rmw_implementation_env_var),
-        SetEnvironmentVariable(name='LD_LIBRARY_PATH', value=ld_library_path_env_var),
         world_name,
         robot_name,
         headless,
@@ -79,6 +77,10 @@ def generate_launch_description():
                 '--renderer', LaunchConfiguration('renderer')
             ],
             shell = LaunchConfiguration('verbose'),
-            output = "screen"
+            output = "screen",
+            additional_env = {
+                "RMW_IMPLEMENTATION": rmw_implementation_env_var,
+                "LD_LIBRARY_PATH": ld_library_path_env_var
+            }
         )
     ])
