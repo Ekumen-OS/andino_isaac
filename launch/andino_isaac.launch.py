@@ -2,8 +2,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess
 from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 
 def search_isaac_install_path():
     ISAAC_VERSION = "isaac_sim-2023.1.0-hotfix.1"
@@ -60,7 +61,19 @@ def generate_launch_description():
         description='Show Isaac sim output',
     )
 
+    # Andino description
+    pkg_andino_description = get_package_share_directory('andino_description')
+    include_andino_description = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_andino_description, 'launch', 'andino_description.launch.py'),
+        ),
+        launch_arguments={
+            'rsp': 'True',
+        }.items()
+    )
+
     return LaunchDescription([
+        include_andino_description,
         world_name,
         robot_name,
         headless,
