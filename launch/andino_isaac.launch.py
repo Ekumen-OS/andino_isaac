@@ -6,7 +6,7 @@ from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, Execut
 from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
 
 def search_isaac_install_path():
-    ISAAC_VERSION = "isaac_sim-2023.1.0"
+    ISAAC_VERSION = "isaac_sim-2023.1.0-hotfix.1"
     user_home_path = os.path.expanduser("~")
     isaac_install_path = ""
     for dirpath, dirnames, _ in os.walk(user_home_path):
