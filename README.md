@@ -7,7 +7,7 @@ This package provides a simulation environment for [Andino](https://github.com/E
 - ROS 2: Humble Hawksbill
 - OS:
   - Ubuntu 22.04 Jammy Jellyfish
-- Isaac Sim 2023.1.0
+- Isaac Sim 2023.1.1
 
 ## :inbox_tray: Installation
 
