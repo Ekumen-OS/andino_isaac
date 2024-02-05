@@ -2,9 +2,11 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess
+from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.conditions import IfCondition
+from xacro import process_file
 
 def search_isaac_install_path():
     ISAAC_VERSION = "isaac_sim-2023.1.0-hotfix.1"
@@ -15,6 +17,16 @@ def search_isaac_install_path():
             if dirname == ISAAC_VERSION:
                 isaac_install_path = os.path.join(dirpath, ISAAC_VERSION)
     return isaac_install_path
+
+def get_robot_state_publisher_params():
+    pkg_andino_description = get_package_share_directory('andino_description')
+    # Obtain urdf from xacro files.
+    doc = process_file(os.path.join(pkg_andino_description, 'urdf', 'andino.urdf.xacro'))
+    robot_desc = doc.toprettyxml(indent='  ')
+    params = {'robot_description': robot_desc,
+              'use_sim_time': True,
+              'publish_frequency': 30.0}
+    return params
 
 def generate_launch_description():
     # Paths to places
@@ -60,25 +72,29 @@ def generate_launch_description():
         default_value='True',
         description='Show Isaac sim output',
     )
+    rsp_argument = DeclareLaunchArgument(
+        'rsp',
+        default_value='true',
+        description='Run robot state publisher node.'
+    )
 
     # Andino description
-    pkg_andino_description = get_package_share_directory('andino_description')
-    include_andino_description = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_andino_description, 'launch', 'andino_description.launch.py'),
-        ),
-        launch_arguments={
-            'rsp': 'True',
-        }.items()
+    rsp = Node(package='robot_state_publisher',
+                executable='robot_state_publisher',
+                namespace='',
+                output='both',
+                parameters=[get_robot_state_publisher_params()],
+                condition=IfCondition(LaunchConfiguration('rsp'))
     )
 
     return LaunchDescription([
-        include_andino_description,
         world_name,
         robot_name,
         headless,
         renderer,
         verbose,
+        rsp_argument,
+        rsp,
 
         ExecuteProcess(
             cmd = [
