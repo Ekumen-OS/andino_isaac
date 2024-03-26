@@ -49,4 +49,5 @@ ros2 launch andino_isaac andino_isaac.launch.py
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
+[andino_isaac.webm](https://github.com/ekumenlabs/andino_isaac/assets/53065142/1802dc98-d8a0-4ee4-bbb5-df5590063b63)
 
