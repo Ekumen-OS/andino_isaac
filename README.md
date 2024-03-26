@@ -1,4 +1,6 @@
-# :green_heart: Andino simulation in Nvidia Isaac
+# Andino simulation in Nvidia Isaac
+
+<img src=docs/andino_isaac.png width=700/>
 
 This package provides a simulation environment for [Andino](https://github.com/Ekumen-OS/andino) in [Nvidia's Isaac sim](https://www.nvidia.com/en-us/deep-learning-ai/industries/robotics/) integrated with ROS 2 and powered by [Nvidia Omniverse](https://www.nvidia.com/en-us/omniverse/).
 
@@ -40,4 +42,11 @@ Launch the simulation with the provided launchfile
 ros2 launch andino_isaac andino_isaac.launch.py
 ```
 
-Enjoy!
+
+### Teleoperate the robot
+
+```
+ros2 run teleop_twist_keyboard teleop_twist_keyboard
+```
+
+
