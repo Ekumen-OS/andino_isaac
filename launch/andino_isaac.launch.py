@@ -77,6 +77,11 @@ def generate_launch_description():
         default_value='true',
         description='Run robot state publisher node.'
     )
+    rviz_argument = DeclareLaunchArgument(
+        'rviz',
+        default_value='true',
+        description='Run rviz node.'
+    )
 
     # Andino description
     rsp = Node(package='robot_state_publisher',
@@ -87,12 +92,22 @@ def generate_launch_description():
                 condition=IfCondition(LaunchConfiguration('rsp'))
     )
 
+    rviz = Node(package='rviz2',
+                executable='rviz2',
+                output='screen',
+                arguments=['-d', os.path.join(pkg_andino_isaac_path, 'config', 'andino_isaac.rviz')],
+                parameters=[{'use_sim_time': True}],
+                condition=IfCondition(LaunchConfiguration('rviz'))
+    )
+
     return LaunchDescription([
         world_name,
         robot_name,
         headless,
         renderer,
         verbose,
+        rviz_argument,
+        rviz,
         rsp_argument,
         rsp,
 
