@@ -20,7 +20,7 @@ docker run -it --rm --privileged \
 	-v ~/docker/isaac-sim/logs:/root/.nvidia-omniverse/logs:rw \
 	-v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
 	-v ~/docker/isaac-sim/documents:/root/Documents:rw \
-	-v $PKGDIR/..:/ws/src/ \
+	-v $PKGDIR/:/ws/src/andino_isaac \
 	--name isaac-sim \
 	--gpus all \
 	--network host \
