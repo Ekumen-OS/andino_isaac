@@ -8,15 +8,29 @@ from launch.substitutions import PathJoinSubstitution, LaunchConfiguration
 from launch.conditions import IfCondition
 from xacro import process_file
 
+def is_running_in_docker_container():
+    return os.path.isfile("/.dockerenv")
+
+
 def search_isaac_install_path():
-    ISAAC_VERSION = "isaac_sim-2023.1.1"
-    user_home_path = os.path.expanduser("~")
-    isaac_install_path = ""
-    for dirpath, dirnames, _ in os.walk(user_home_path):
-        for dirname in dirnames:
-            if dirname == ISAAC_VERSION:
-                isaac_install_path = os.path.join(dirpath, ISAAC_VERSION)
-    return isaac_install_path
+    if not is_running_in_docker_container():
+        user_home_path = os.path.expanduser("~")
+        def get_isaac_base_install_path():
+            for dirpath, dirnames, _ in os.walk(user_home_path):
+                for dirname in dirnames:
+                    if "isaac_sim-" in dirname:
+                        return dirpath
+            return None
+        isaac_install_path = get_isaac_base_install_path()
+        if isaac_install_path is None:
+            raise IOError("Isaac Sim install path not found")
+        isaac_versions = [version for version in os.listdir(isaac_install_path) if "isaac_sim-" in version]
+        isaac_versions.sort()
+        return os.path.join(isaac_install_path, isaac_versions[-1])
+    else:
+        if os.path.isfile("/isaac-sim/python.sh"):
+            return "/isaac-sim"
+
 
 def get_robot_state_publisher_params():
     pkg_andino_description = get_package_share_directory('andino_description')
