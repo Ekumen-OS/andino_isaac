@@ -28,7 +28,7 @@ done
 
 # Update the arguments to default values if needed.
 OS_VERSION="jammy"
-IMAGE_NAME=${IMAGE_NAME:-isaac_dev_docker}
+IMAGE_NAME=${IMAGE_NAME:-isaac_sim_ros2_humble_andino}
 DOCKERFILE_PATH=$SCRIPT_FOLDER_PATH/Dockerfile
 
 USERID=$(id -u)
