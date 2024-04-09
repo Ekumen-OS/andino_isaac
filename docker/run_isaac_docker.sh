@@ -1,8 +1,9 @@
 #!/bin/bash
 
+ARG USER
+
 DOCKERDIR="$( cd "$( dirname "$0" )" && pwd )"
 PKGDIR=$DOCKERDIR/..
-
 
 xhost +local:root
 docker run -it --rm --privileged \
@@ -20,8 +21,8 @@ docker run -it --rm --privileged \
 	-v ~/docker/isaac-sim/logs:/root/.nvidia-omniverse/logs:rw \
 	-v ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw \
 	-v ~/docker/isaac-sim/documents:/root/Documents:rw \
-	-v $PKGDIR/:/ws/src/andino_isaac \
+	-v $PKGDIR/:/home/$USER/ws/src/andino_isaac \
 	--name isaac-sim \
 	--gpus all \
 	--network host \
-	isaac_dev_docker:latest
+	isaac_sim_ros2_humble_andino:latest
