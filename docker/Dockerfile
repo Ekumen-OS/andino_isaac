@@ -27,8 +27,6 @@ RUN rm install.sh requirements.txt
 RUN rosdep init && rosdep update
 
 # Create a user with passwordless sudo
-RUN groupmod -g 1001 ubuntu \
-  && usermod -u 1001 -g 1001 ubuntu
 RUN adduser --uid $USERID --gecos "ekumen developer" --disabled-password $USER
 RUN adduser $USER sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
