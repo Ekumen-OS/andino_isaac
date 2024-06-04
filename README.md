@@ -25,6 +25,7 @@ git clone https://github.com/ekumenlabs/andino_isaac.git
 - Build the Isaac/ROS 2 container:
 
 ```
+docker pull nvcr.io/nvidia/isaac-sim:2023.1.1
 ./docker/build.sh
 ```
 
