@@ -4,7 +4,6 @@ ARG ISAAC_SIM_VERSION=2023.1.1
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
 
 # Arguments for building
-ARG USERID
 ARG USER
 
 # Setup environment
@@ -27,7 +26,7 @@ RUN rm install.sh requirements.txt
 RUN rosdep init && rosdep update
 
 # Create a user with passwordless sudo
-RUN adduser --uid $USERID --gecos "ekumen developer" --disabled-password $USER
+RUN adduser --gecos "ekumen developer" --disabled-password $USER
 RUN adduser $USER sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 RUN echo "export QT_X11_NO_MITSHM=1" >> /home/$USER/.bashrc
