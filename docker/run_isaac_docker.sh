@@ -5,6 +5,11 @@ ARG USER
 DOCKERDIR="$( cd "$( dirname "$0" )" && pwd )"
 PKGDIR=$DOCKERDIR/..
 
+# Nvidia's instructions indicates that this also needs to be mounted:
+#   -v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
+# We do not include it because it caused launch issues:
+#   https://github.com/Ekumen-OS/andino_isaac/pull/19#issuecomment-2159105512
+
 xhost +local:root
 docker run -it --rm --privileged \
 	--entrypoint bash \
