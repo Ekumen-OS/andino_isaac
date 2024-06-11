@@ -10,12 +10,18 @@ from xacro import process_file
 
 def search_isaac_install_path():
     ISAAC_VERSION = "isaac_sim-2023.1.1"
-    user_home_path = os.path.expanduser("~")
     isaac_install_path = ""
+    # Check the install path for a non-Docker environment
+    user_home_path = os.path.expanduser("~")
     for dirpath, dirnames, _ in os.walk(user_home_path):
         for dirname in dirnames:
             if dirname == ISAAC_VERSION:
                 isaac_install_path = os.path.join(dirpath, ISAAC_VERSION)
+    # If not found, check if the install path corresponds to one of a Docker environment
+    if isaac_install_path == "":
+        ISAAC_DOCKER_INSTALL_PATH = "/isaac-sim"
+        os.path.isdir(ISAAC_DOCKER_INSTALL_PATH)
+        isaac_install_path = ISAAC_DOCKER_INSTALL_PATH
     return isaac_install_path
 
 def get_robot_state_publisher_params():

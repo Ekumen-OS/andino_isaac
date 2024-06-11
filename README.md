@@ -19,6 +19,22 @@ Clone this repository into the src folder of a ROS2 workspace
 git clone https://github.com/ekumenlabs/andino_isaac.git
 ```
 
+## :inbox_tray: Docker environment installation
+
+- Configure and pull the Nvidia Isaac Sim Docker container, follow steps 1 to 6 of the [Nvidia instructions](https://docs.omniverse.nvidia.com/isaacsim/latest/installation/install_container.html#container-deployment).
+- Build the Isaac/ROS 2 container:
+
+```
+docker pull nvcr.io/nvidia/isaac-sim:2023.1.1
+./docker/build.sh
+```
+
+- Run the container and continue with the ROS 2 build
+
+```
+./docker/run_isaac_docker.sh
+```
+
 ## :package: Build
 
 The package contains some dependencies that must be installed in order to build it:
