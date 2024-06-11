@@ -13,7 +13,6 @@ docker run -it --rm --privileged \
 	-e "PRIVACY_CONSENT=Y" \
 	-e "TERM=xterm-256color" \
 	-v "/tmp/.X11-unix:/tmp/.X11-unix:rw" \
-	-v ~/docker/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw \
 	-v ~/docker/isaac-sim/cache/ov:/root/.cache/ov:rw \
 	-v ~/docker/isaac-sim/cache/pip:/root/.cache/pip:rw \
 	-v ~/docker/isaac-sim/cache/glcache:/root/.cache/nvidia/GLCache:rw \

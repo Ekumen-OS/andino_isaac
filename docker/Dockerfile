@@ -22,9 +22,6 @@ COPY docker/requirements.txt .
 RUN ./install.sh
 RUN rm install.sh requirements.txt
 
-# Adds the rosdep update to the entrypoint.
-RUN rosdep init && rosdep update
-
 # Create a user with passwordless sudo
 RUN adduser --gecos "ekumen developer" --disabled-password $USER
 RUN adduser $USER sudo
@@ -49,6 +46,9 @@ RUN mkdir -p /home/$USER/ws/src
 RUN echo "source /opt/ros/humble/setup.bash" >> /home/$USER/.bashrc
 # Adds colcon autocomplete
 RUN echo "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash" >> /home/$USER/.bashrc
+
+# Adds the rosdep update to the entrypoint.
+RUN sudo rosdep init && rosdep update
 
 # Defines a workspace folder.
 WORKDIR /isaac-sim
