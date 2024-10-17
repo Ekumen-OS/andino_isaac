@@ -1,5 +1,6 @@
 import argparse
 import carb
+import isaacsim
 from omni.isaac.kit import SimulationApp
 
 # This sample loads a usd stage and starts simulation
@@ -35,8 +36,6 @@ try:
 	carb.log_info("Loading world please wait")
 	open_stage(args.world_file)
 	# Wait two frames so that stage starts loading
-	simulation_app.update()
-	simulation_app.update()
 	while is_stage_loading():
 		simulation_app.update()
 	world_settings = {"physics_dt": 1.0 / 60.0, "stage_units_in_meters": 1.0, "rendering_dt": 1.0 / 60.0}
