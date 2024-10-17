@@ -1,0 +1,33 @@
+services:
+  andino_isaac:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: andino_isaac
+    network_mode: host
+    working_dir: /home/dev/ws/
+    privileged: true
+    environment:
+      - DISPLAY
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/tmp/.docker.xauth
+      - OMNI_KIT_ACCEPT_EULA=Y
+      - ACCEPT_EULA=Y
+      - PRIVACY_CONSENT=Y
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /tmp/.docker.xauth:/tmp/.docker.xauth
+      - isaac-cache:/home/dev/.isaac-sim-cache:rw
+      # Workspace
+      - ..:/home/dev/ws/src/andino_isaac:rw
+    devices:
+      - /dev/dri:/dev/dri
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+volumes:
+  isaac-cache:
