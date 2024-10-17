@@ -17,21 +17,14 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o 
 RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
 RUN apt update
 
+# Install apt requirements
 COPY --link docker/requirements.txt /requirements.txt
-# hadolint ignore=SC2046
-RUN apt-get update && \
-    apt-get install --no-install-recommends -y $(cat /requirements.txt) && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install --no-install-recommends -y $(cat /requirements.txt) && rm -rf /var/lib/apt/lists/*
 RUN rm /requirements.txt
 
 # Create a user with passwordless sudo
 RUN addgroup $GROUP && adduser --ingroup $GROUP --disabled-password --gecos "" $USER && \
     adduser $USER sudo && echo "$USER ALL=NOPASSWD: ALL" >> /etc/sudoers.d/$USER
-
-# Ensure cache folder is created. Add symlink to ease mounting it
-RUN mkdir -p $HOME_FOLDER/.local/lib/python3.10/site-packages/omni/cache && \
-    ln -s $HOME_FOLDER/.local/lib/python3.10/site-packages/omni/cache $HOME_FOLDER/.isaac-sim-cache && \
-    chown $USER:$GROUP $HOME_FOLDER/.isaac-sim-cache -R
 
 USER $USER:$GROUP
 
