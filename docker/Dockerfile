@@ -28,6 +28,11 @@ RUN rm /requirements.txt
 RUN addgroup $GROUP && adduser --ingroup $GROUP --disabled-password --gecos "" $USER && \
     adduser $USER sudo && echo "$USER ALL=NOPASSWD: ALL" >> /etc/sudoers.d/$USER
 
+# Ensure cache folder is created. Add symlink to ease mounting it
+RUN mkdir -p $HOME_FOLDER/.local/lib/python3.10/site-packages/omni/cache && \
+    ln -s $HOME_FOLDER/.local/lib/python3.10/site-packages/omni/cache $HOME_FOLDER/.isaac-sim-cache && \
+    chown $USER:$GROUP $HOME_FOLDER/.isaac-sim-cache -R
+
 USER $USER:$GROUP
 
 # Change isaac-sim's ownership
