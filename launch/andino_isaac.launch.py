@@ -9,7 +9,7 @@ from launch.conditions import IfCondition
 from xacro import process_file
 
 def search_isaac_install_path():
-    ISAAC_VERSION = "isaac-sim-4.0.0"
+    ISAAC_VERSION = "isaac-sim-4.2.0"
     isaac_install_path = ""
     # Check the install path for a non-Docker environment
     user_home_path = os.path.expanduser("~")
