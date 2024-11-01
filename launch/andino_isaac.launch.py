@@ -9,7 +9,7 @@ from launch.conditions import IfCondition
 from xacro import process_file
 
 def search_isaac_install_path():
-    ISAAC_VERSION = "isaac_sim-2023.1.1"
+    ISAAC_VERSION = "isaac-sim-4.2.0"
     isaac_install_path = ""
     # Check the install path for a non-Docker environment
     user_home_path = os.path.expanduser("~")
@@ -17,6 +17,10 @@ def search_isaac_install_path():
         for dirname in dirnames:
             if dirname == ISAAC_VERSION:
                 isaac_install_path = os.path.join(dirpath, ISAAC_VERSION)
+                break
+        # Keep the first found path
+        if isaac_install_path:
+            break
     # If not found, check if the install path corresponds to one of a Docker environment
     if isaac_install_path == "":
         ISAAC_DOCKER_INSTALL_PATH = "/isaac-sim"
@@ -85,7 +89,7 @@ def generate_launch_description():
     )
     rviz_argument = DeclareLaunchArgument(
         'rviz',
-        default_value='true',
+        default_value='false',
         description='Run rviz node.'
     )
 

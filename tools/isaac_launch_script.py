@@ -20,31 +20,26 @@ CONFIG["renderer"] = args.renderer
 simulation_app = SimulationApp(launch_config=CONFIG)
 
 # Now that the simulation app is open, continue to load the extension, world and robot
-# These imports need to be here as they depend on SimulationApp
-from omni.isaac.core import World
-from omni.isaac.core.utils.extensions import enable_extension
-from omni.isaac.core.utils.stage import open_stage, is_stage_loading, add_reference_to_stage
 
 # Enable the ros2_bridge extension. Environment variables must be set
+from omni.isaac.core.utils.extensions import enable_extension
 if not enable_extension("omni.isaac.ros2_bridge"):
 	carb.log_error("ROS2_BRIDGE extension could not be loaded, aborting startup")
 	simulation_app.close()
+simulation_app.update()
 
-# Open world
+# Load stage
+import omni
+from omni.isaac.core.utils.stage import is_stage_loading, add_reference_to_stage
 try:
-	carb.log_info("Loading world please wait")
-	open_stage(args.world_file)
-	# Wait two frames so that stage starts loading
-	simulation_app.update()
-	simulation_app.update()
-	while is_stage_loading():
-		simulation_app.update()
-	world_settings = {"physics_dt": 1.0 / 60.0, "stage_units_in_meters": 1.0, "rendering_dt": 1.0 / 60.0}
-	world = World(**world_settings)
-	carb.log_info("World loaded")
+    omni.usd.get_context().open_stage(args.world_file)
 except ValueError:
-	carb.log_error("Stage could not be loaded, check file path. Aborting startup")
-	simulation_app.close()
+    carb.log_error(f"The usd path {args.world_file} could not be opened.")
+    simulation_app.close()
+simulation_app.update()
+simulation_app.update()
+while is_stage_loading():
+    simulation_app.update()
 
 # Load robot
 carb.log_info("Loading robot")
@@ -54,14 +49,8 @@ try:
 except FileNotFoundError:
 	carb.log_warn("Robot could not be loaded. Check robot file path or load it manually in the simulation")
 
-world.reset()
-
+omni.timeline.get_timeline_interface().play()
 while simulation_app.is_running():
-	world.step()
-
-	# Deal with pause/stop
-	if world.is_playing():
-		if world.current_time_step_index == 0:
-			world.reset()
-
+    simulation_app.update()
+omni.timeline.get_timeline_interface().stop()
 simulation_app.close()
