@@ -89,7 +89,7 @@ def generate_launch_description():
     )
     rviz_argument = DeclareLaunchArgument(
         'rviz',
-        default_value='true',
+        default_value='false',
         description='Run rviz node.'
     )
 
