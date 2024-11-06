@@ -132,7 +132,7 @@ def Xform "root" (
             def Shader "Image_Texture"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/wood_floor_diff_4k.jpg@
+                asset inputs:file = @textures/wood_floor_diff_4k.jpg@
                 token inputs:sourceColorSpace = "sRGB"
                 float2 inputs:st.connect = </root/_materials/wood/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
@@ -160,7 +160,7 @@ def Xform "root" (
             def Shader "Image_Texture_001"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/wood_floor_rough_4k.exr@
+                asset inputs:file = @textures/wood_floor_rough_4k.exr@
                 float2 inputs:st.connect = </root/_materials/wood/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
                 token inputs:wrapT = "repeat"
@@ -170,7 +170,7 @@ def Xform "root" (
             def Shader "Image_Texture_002"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/wood_floor_nor_gl_4k.exr@
+                asset inputs:file = @textures/wood_floor_nor_gl_4k.exr@
                 float2 inputs:st.connect = </root/_materials/wood/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
                 token inputs:wrapT = "repeat"
@@ -199,7 +199,7 @@ def Xform "root" (
             def Shader "Image_Texture"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/Tiles054_1K-JPG_Color.jpg@
+                asset inputs:file = @textures/Tiles054_1K-JPG_Color.jpg@
                 token inputs:sourceColorSpace = "sRGB"
                 float2 inputs:st.connect = </root/_materials/Material_005/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
@@ -227,7 +227,7 @@ def Xform "root" (
             def Shader "Image_Texture_001"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/Tiles054_1K-JPG_Roughness.jpg@
+                asset inputs:file = @textures/Tiles054_1K-JPG_Roughness.jpg@
                 token inputs:sourceColorSpace = "sRGB"
                 float2 inputs:st.connect = </root/_materials/Material_005/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
@@ -258,7 +258,7 @@ def Xform "root" (
             def Shader "Image_Texture_001"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/macro_flour_diff_4k.jpg@
+                asset inputs:file = @textures/macro_flour_diff_4k.jpg@
                 token inputs:sourceColorSpace = "sRGB"
                 float2 inputs:st.connect = </root/_materials/Material_007/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
@@ -286,7 +286,7 @@ def Xform "root" (
             def Shader "Image_Texture_002"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/macro_flour_rough_4k.exr@
+                asset inputs:file = @textures/macro_flour_rough_4k.exr@
                 float2 inputs:st.connect = </root/_materials/Material_007/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
                 token inputs:wrapT = "repeat"
@@ -296,7 +296,7 @@ def Xform "root" (
             def Shader "Image_Texture_003"
             {
                 uniform token info:id = "UsdUVTexture"
-                asset inputs:file = @../../andino_gz/andino_gz/models/office/textures/macro_flour_nor_gl_4k.exr@
+                asset inputs:file = @textures/macro_flour_nor_gl_4k.exr@
                 float2 inputs:st.connect = </root/_materials/Material_007/Mapping.outputs:result>
                 token inputs:wrapS = "repeat"
                 token inputs:wrapT = "repeat"
