@@ -9,7 +9,7 @@ This package provides a simulation environment for [Andino](https://github.com/E
 - ROS 2: Humble Hawksbill
 - OS:
   - Ubuntu 22.04 Jammy Jellyfish
-- Isaac Sim 4.2.0 (optional if not using Docker)
+- Isaac Sim 4.5.0 (optional if not using Docker)
 
 ## :inbox_tray: Installation
 
@@ -23,7 +23,7 @@ git clone https://github.com/ekumenlabs/andino_isaac.git
 
 This is an optional step. If not using Docker go to the [Build](#package-build) section.
 
-- Configure and pull the Nvidia Isaac Sim Docker container, follow steps 1 to 6 of the [Nvidia instructions](https://docs.omniverse.nvidia.com/isaacsim/latest/installation/install_container.html#container-deployment).
+- Configure and pull the Nvidia Isaac Sim Docker container, follow steps of the [Nvidia instructions](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/install_container.html) up to pulling the 4.5.0 image (Step 3 of the [Container Deployment](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/install_container.html#container-deployment) section).
 - Build and run the Isaac/ROS 2 container:
 
 ```sh

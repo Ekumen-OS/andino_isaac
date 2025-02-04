@@ -1,4 +1,4 @@
-ARG ISAAC_SIM_VERSION=4.2.0
+ARG ISAAC_SIM_VERSION=4.5.0
 
 # Download base image
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION}
