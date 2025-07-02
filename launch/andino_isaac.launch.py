@@ -9,23 +9,14 @@ from launch.conditions import IfCondition
 from xacro import process_file
 
 def search_isaac_install_path():
-    ISAAC_VERSION = "isaac-sim-4.2.0"
-    isaac_install_path = ""
-    # Check the install path for a non-Docker environment
-    user_home_path = os.path.expanduser("~")
-    for dirpath, dirnames, _ in os.walk(user_home_path):
-        for dirname in dirnames:
-            if dirname == ISAAC_VERSION:
-                isaac_install_path = os.path.join(dirpath, ISAAC_VERSION)
-                break
-        # Keep the first found path
-        if isaac_install_path:
-            break
-    # If not found, check if the install path corresponds to one of a Docker environment
-    if isaac_install_path == "":
-        ISAAC_DOCKER_INSTALL_PATH = "/isaac-sim"
-        os.path.isdir(ISAAC_DOCKER_INSTALL_PATH)
+    # First check if we are in a docker environment
+    # The install path in the Docker image is /isaac-sim
+    ISAAC_DOCKER_INSTALL_PATH = "/isaac-sim"
+    if os.path.isdir(ISAAC_DOCKER_INSTALL_PATH):
         isaac_install_path = ISAAC_DOCKER_INSTALL_PATH
+    # Assume it's in the default installation folder
+    else:
+        isaac_install_path = f'/home/{os.environ.get("USERNAME")}/isaacsim'
     return isaac_install_path
 
 def get_robot_state_publisher_params():
@@ -41,17 +32,6 @@ def get_robot_state_publisher_params():
 def generate_launch_description():
     # Paths to places
     pkg_andino_isaac_path = get_package_share_directory('andino_isaac')
-    # Look for the omniverse install path
-    isaac_install_path = search_isaac_install_path()
-    isaac_python_launcher_path = os.path.join(isaac_install_path, "python.sh")
-    isaac_custom_launch_script = os.path.join(pkg_andino_isaac_path, "tools", "isaac_launch_script.py")
-    full_path_to_world = PathJoinSubstitution([pkg_andino_isaac_path, 'isaac_worlds', LaunchConfiguration('world_name')])
-    full_path_to_robot = PathJoinSubstitution([pkg_andino_isaac_path, 'andino_isaac_description', LaunchConfiguration('robot_name')])
-
-    # Environment variables
-    prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
-    ld_library_path_env_var = prev_ld_library_path + ":" + isaac_install_path + "/exts/omni.isaac.ros2_bridge/humble/lib"
-    rmw_implementation_env_var = 'rmw_fastrtps_cpp'
 
     # Arguments
     world_name = DeclareLaunchArgument(
@@ -92,6 +72,18 @@ def generate_launch_description():
         default_value='false',
         description='Run rviz node.'
     )
+
+    # Look for the omniverse install path
+    isaac_install_path = search_isaac_install_path()
+    isaac_python_launcher_path = os.path.join(isaac_install_path, "python.sh")
+    isaac_custom_launch_script = os.path.join(pkg_andino_isaac_path, "tools", "isaac_launch_script.py")
+    full_path_to_world = PathJoinSubstitution([pkg_andino_isaac_path, 'isaac_worlds', LaunchConfiguration('world_name')])
+    full_path_to_robot = PathJoinSubstitution([pkg_andino_isaac_path, 'andino_isaac_description', LaunchConfiguration('robot_name')])
+
+    # Environment variables
+    prev_ld_library_path = os.environ.get("LD_LIBRARY_PATH", "")
+    ld_library_path_env_var = prev_ld_library_path + ":" + isaac_install_path + "/exts/isaacsim.ros2.bridge/humble/lib"
+    rmw_implementation_env_var = 'rmw_fastrtps_cpp'
 
     # Andino description
     rsp = Node(package='robot_state_publisher',

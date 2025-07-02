@@ -1,13 +1,15 @@
 services:
   andino_isaac:
+    user: ${USERID}:${GROUPID}
     build:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: andino_isaac
     network_mode: host
-    working_dir: /home/dev/ws/
+    working_dir: /home/ubuntu/ws/
     privileged: true
     environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-10}
       - DISPLAY
       - QT_X11_NO_MITSHM=1
       - XAUTHORITY=/tmp/.docker.xauth
@@ -29,7 +31,7 @@ services:
       - ~/docker/isaac-sim/config:/root/.nvidia-omniverse/config:rw
       - ~/docker/isaac-sim/shadercache:/isaac-sim/kit/exts/omni.gpu_foundation/cache/nv_shadercache:rw
       # Workspace
-      - ..:/home/dev/ws/src/andino_isaac:rw
+      - ..:/home/ubuntu/ws/src/andino_isaac:rw
     devices:
       - /dev/dri:/dev/dri
     deploy:
