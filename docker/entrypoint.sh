@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-sudo chown dev /isaac-sim/kit/cache -R
-sudo chown dev /isaac-sim/kit/data -R
-sudo chown dev /isaac-sim/kit/logs -R
+sudo chown "$USER" /isaac-sim/kit/cache -R
+sudo chown "$USER" /isaac-sim/kit/data -R
+sudo chown "$USER" /isaac-sim/kit/logs -R
+source /opt/ros/humble/setup.bash
 bash
