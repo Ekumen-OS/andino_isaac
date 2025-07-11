@@ -65,7 +65,7 @@ RUN echo "$USER ALL=NOPASSWD: ALL" >> /etc/sudoers.d/$USER
 
 USER $USER:$GROUP
 
-ENV USER_WS /home/$USER/ws
+ENV USER_WS=/home/$USER/ws
 
 RUN mkdir -p $USER_WS/src
 WORKDIR $USER_WS
