@@ -11,29 +11,45 @@ services:
     runtime: nvidia
     privileged: true
     environment:
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-10}
       - LOCAL_UID=${LOCAL_UID}
       - LOCAL_GID=${LOCAL_GID}
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/tmp/.docker.xauth
+      - DISPLAY
+      # Nvidia related
       - OMNI_KIT_ACCEPT_EULA=Y
       - ACCEPT_EULA=Y
       - PRIVACY_CONSENT=Y
       - OMNI_USER=admin
       - OMNI_PASS=amin
       - OMNI_SERVER=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1
-      - XAUTHORITY=/tmp/.docker.xauth
-      - QT_X11_NO_MITSHM=1
-      - DISPLAY
+      # ROS
+      - ROS_LOCALHOST_ONLY=1
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-10}
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib
+      # Sim variables
+      - ISAAC_LAUNCH_SCRIPT=${ISAAC_LAUNCH_SCRIPT}
+      - PHYSICS_RATE=${PHYSICS_RATE}
+      - VIEWPORT=${VIEWPORT}
+      - RENDERING_RATE=${RENDERING_RATE}
+      - SCENARIO_PATH=${SCENARIO_PATH}
+      - ROBOT_PATH=${ROBOT_PATH}
+      - HEADLESS=${HEADLESS}
+      - START_STOPPED=${START_STOPPED}
+      - RUN_REAL_TIME=${RUN_REAL_TIME}
     volumes:
       - $HOME/.Xauthority:/isaac-sim/.Xauthority
       # Isaac related
-      - ~/docker/isaac-sim-padawan/cache/main:/isaac-sim/.cache:rw
-      - ~/docker/isaac-sim-padawan/cache/computecache:/isaac-sim/.nv/ComputeCache:rw
-      - ~/docker/isaac-sim-padawan/config:/isaac-sim/.nvidia-omniverse/config:rw
-      - ~/docker/isaac-sim-padawan/data:/isaac-sim/.local/share/ov/data:rw
-      - ~/docker/isaac-sim-padawan/logs:/isaac-sim/.nvidia-omniverse/logs:rw
-      - ~/docker/isaac-sim-padawan/pkg:/isaac-sim/.local/share/ov/pkg:rw
+      - ~/docker/isaac-sim-andino/cache/main:/isaac-sim/.cache:rw
+      - ~/docker/isaac-sim-andino/cache/computecache:/isaac-sim/.nv/ComputeCache:rw
+      - ~/docker/isaac-sim-andino/config:/isaac-sim/.nvidia-omniverse/config:rw
+      - ~/docker/isaac-sim-andino/data:/isaac-sim/.local/share/ov/data:rw
+      - ~/docker/isaac-sim-andino/logs:/isaac-sim/.nvidia-omniverse/logs:rw
+      - ~/docker/isaac-sim-andino/pkg:/isaac-sim/.local/share/ov/pkg:rw
       # Workspace
       - ..:/home/isaac-sim/ws:rw
+    entrypoint: ["/home/isaac-sim/ws/docker/${ENTRYPOINT}" ]
     devices:
       - /dev/dri:/dev/dri
     deploy:

@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
+
+"""Runner script for Isaac Sim."""
+
+import argparse
+import argcomplete
+import subprocess
+import sys
+import os
+
+from argparse import RawTextHelpFormatter
+from pathlib import Path
+
+HOST_REPO_DIR = Path(__file__).parent
+HOST_DOCKER_DIR = HOST_REPO_DIR / "docker"
+HOST_SIMULATION_ROBOTS_DIR = HOST_REPO_DIR / "andino_model"
+HOST_SIMULATION_SCENARIOS_DIR = HOST_REPO_DIR / "scenarios"
+
+CONTAINER_SIMULATION_ROBOT_DIR = Path(
+    "/home/isaac-sim/ws/andino_model"
+)
+CONTAINER_SIMULATION_SCENARIOS_DIR = Path(
+    "/home/isaac-sim/ws/scenarios"
+)
+CONTAINER_ISAAC_LAUNCH_SCRIPT = (
+    "/home/isaac-sim/ws/scripts/isaac_launch_script.py"
+)
+SIM_SERVICE_NAME = "andino_isaac"
+
+
+def run_cmd(cmd, cwd=None):
+    try:
+        return subprocess.call(cmd, cwd=cwd, shell=True)
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+
+def run_compose(service_name: str, env_vars=None):
+    env_vars = " ".join(env_vars) if env_vars else ""
+    compose_args = "--abort-on-container-exit --remove-orphans"
+    print(env_vars)
+    cmd = f"{env_vars} docker compose up {service_name} {compose_args}"
+    return run_cmd(cmd, HOST_DOCKER_DIR)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="""
+description:
+    andino_isaac Script to run the simulation
+""",
+        epilog="""
+examples:
+  andino_isaac run --scenario plain_world.usda
+""",
+        formatter_class=RawTextHelpFormatter,
+    )
+
+    subparser = parser.add_subparsers()
+
+    build_parser = subparser.add_parser("build", description="Build the docker image")
+    build_parser.set_defaults(build=True)
+
+    run_parser = subparser.add_parser("run", description="Run the simulation")
+    run_parser.set_defaults(run=True)
+
+    # Run the Standard Simulation
+    run_parser.add_argument(
+        "--physics-rate", type=int, default=60, help="Simulation rate in Hz."
+    )
+    run_parser.add_argument(
+        "--rendering-rate",
+        type=int,
+        default=30,
+        help="Rendering Simulation rate in Hz.",
+    )
+    run_parser.add_argument(
+        "--headless", action="store_true", help="Run in headless mode."
+    )
+    run_parser.add_argument(
+        "--build",
+        action="store_true",
+        help="Build the docker image before running.",
+    )
+    run_parser.add_argument(
+        "--stop",
+        action="store_true",
+        required=False,
+        help="Starts the simulation stopped",
+    )
+    run_parser.add_argument(
+        "--run-real-time",
+        action="store_true",
+        required=False,
+        help="Run the simulation in real-time",
+    )
+    run_parser.add_argument(
+        "--scenario",
+        type=str,
+        required=False,
+        choices=[
+            p.name
+            for p in HOST_SIMULATION_SCENARIOS_DIR.iterdir()
+            if (not p.is_dir() and p.name != "common")
+        ],
+        default="plain_world.usda",
+        help="The scenario to use",
+    )
+    run_parser.add_argument(
+        "--viewport",
+        type=str,
+        required=False,
+        choices=["local", "remote"],
+        default="local",
+        help="Run local or remote",
+    )
+    run_parser.add_argument(
+        "--ros-domain-id",
+        type=int,
+        required=True,
+        help="ROS_DOMAIN_ID env var to use",
+    )
+
+    argcomplete.autocomplete(parser)
+    args = parser.parse_args()
+
+    #######
+    # Build
+    #######
+    if "build" in args and args.build:
+        cmd = f"docker compose build {SIM_SERVICE_NAME}"
+        run_cmd(cmd, HOST_DOCKER_DIR)
+
+    #####
+    # Run
+    #####
+    if "run" in args and args.run:
+        env_vars = []
+        if args.headless:
+            env_vars.append("HEADLESS=true")
+        if args.stop:
+            env_vars.append("START_STOPPED=true")
+        if args.run_real_time:
+            env_vars.append("RUN_REAL_TIME=true")
+
+        # Get current user UID and GID
+        local_uid = os.getuid()
+        local_gid = os.getgid()
+        env_vars.append(f"LOCAL_UID={local_uid}")
+        env_vars.append(f"LOCAL_GID={local_gid}")
+
+        run_cmd("xhost +local:docker")
+
+        env_vars.extend(
+            [
+                f"ROS_DOMAIN_ID={args.ros_domain_id}",
+                f"ISAAC_LAUNCH_SCRIPT={CONTAINER_ISAAC_LAUNCH_SCRIPT}",
+                f"PHYSICS_RATE={args.physics_rate}",
+                f"RENDERING_RATE={args.rendering_rate}",
+                f"SCENARIO_PATH={str(CONTAINER_SIMULATION_SCENARIOS_DIR / args.scenario)}",
+                f"ROBOT_PATH={str(CONTAINER_SIMULATION_ROBOT_DIR / 'andino.usda')}",
+                f"VIEWPORT={args.viewport}",
+                "ENTRYPOINT=entrypoint.sh",
+            ]
+        )
+
+        # Create cache directories
+        print("Creating Isaac Sim cache directories...")
+        base_path = Path.home() / "docker/isaac-sim-andino"
+        dirs_to_create = [
+            "cache/main/ov",
+            "cache/main/warp",
+            "cache/computecache",
+            "config",
+            "data/documents",
+            "data/Kit",
+            "logs",
+            "pkg"
+        ]
+        for d in dirs_to_create:
+            path = base_path / d
+            path.mkdir(parents=True, exist_ok=True)
+
+        run_compose(SIM_SERVICE_NAME, env_vars)
+
+        run_cmd("xhost -local:docker")
+
+
+if __name__ == "__main__":
+    main()
