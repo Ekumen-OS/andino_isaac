@@ -6,54 +6,35 @@ This package provides a simulation environment for [Andino](https://github.com/E
 
 ## :clamp: Platforms
 
-- ROS 2: Humble Hawksbill
 - OS:
-  - Ubuntu 22.04 Jammy Jellyfish
-- Isaac Sim 4.5.0 (optional if not using Docker)
+  - Ubuntu 22.04 Jammy Jellyfish or Ubuntu 24.04 Noble Numbat
+- ROS 2 Jazzy (optional if the user wants to test ROS 2 integration)
 
 ## :inbox_tray: Installation
 
-Clone this repository into the src folder of a ROS2 workspace
+Clone this repository:
 
 ```sh
 git clone https://github.com/ekumenlabs/andino_isaac.git
+cd andino_isaac
 ```
 
-## :inbox_tray: (Optional) Docker environment installation
-
-This is an optional step. If not using Docker go to the [Build](#package-build) section.
-
-- Configure and pull the Nvidia Isaac Sim Docker container, follow steps of the [Nvidia instructions](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/install_container.html) up to pulling the 4.5.0 image (Step 3 of the [Container Deployment](https://docs.isaacsim.omniverse.nvidia.com/4.5.0/installation/install_container.html#container-deployment) section).
-- Build and run the Isaac/ROS 2 container:
+Source the environment and build the Docker image:
 
 ```sh
-./docker/run.sh
-```
-
-Note: If you need to re-build the image pass the `--build` flag to the above command.
-
-## :package: Build
-
-The package contains some dependencies that must be installed in order to build it:
-
-```sh
-rosdep install --from-paths src -i -y
-```
-
-Then build the package and source the install workspace. To do so run the following commands:
-
-```sh
-colcon build
-source install/setup.bash
+source setup.bash
+andino_isaac build
 ```
 
 ## :rocket: Usage
 
-Launch the simulation with the provided launchfile
+Launch the simulation with the following command, this will use the default environment:
 
 ```sh
-ros2 launch andino_isaac andino_isaac.launch.py
+andino_isaac run
 ```
+
+Check all the available options with `andino_isaac --help`.
 
 ### Teleoperate the robot
 
