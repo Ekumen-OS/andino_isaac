@@ -9,6 +9,8 @@ services:
     working_dir: /home/ubuntu/ws/
     privileged: true
     environment:
+      - LOCAL_UID=${LOCAL_UID}
+      - LOCAL_GID=${LOCAL_GID}
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-10}
       - DISPLAY
       - QT_X11_NO_MITSHM=1
