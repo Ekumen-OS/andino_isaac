@@ -1,19 +1,6 @@
 ARG ISAAC_SIM_VERSION=5.1.0
 
-FROM ros:humble-ros-base-jammy AS cacher
-
-WORKDIR /ws/src
-
-COPY . andino_isaac/
-
-RUN mkdir -p /tmp/ws/src \
-    && find ./ -name "package.xml" | xargs cp --parents -t /tmp/ws/src \
-    && find ./ -name "COLCON_IGNORE" | xargs cp --parents -t /tmp/ws/src \
-    || true
-
 FROM nvcr.io/nvidia/isaac-sim:${ISAAC_SIM_VERSION} AS andino_isaac
-
-ENV ROS_DISTRO=humble
 
 ENV TERM=linux
 ENV DEBIAN_FRONTEND=noninteractive
@@ -27,21 +14,6 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 RUN rm /apt-requirements.txt
-
-# Add the ROS 2 key and install a base ROS 2 installation
-RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
-RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-RUN apt update \
-    && apt install --no-install-recommends -y \
-    --allow-downgrades libbrotli1=1.0.9-2build6 \
-    libbrotli-dev \
-    libfreetype6-dev \
-    libfontconfig1-dev \
-    python3-colcon-common-extensions \
-    python3-rosdep \
-    ros-${ROS_DISTRO}-desktop \
-    && rm -rf /var/lib/apt/lists/*
 
 USER $USER:$GROUP
 
@@ -69,16 +41,6 @@ ENV USER_WS=/home/$USER/ws
 RUN mkdir -p $USER_WS/src
 WORKDIR $USER_WS
 
-# Install the project dependencies
-COPY --from=cacher --chown=$USER:$GROUP /tmp/ws/ $USER_WS/
-RUN /bin/bash -c '\
-    sudo apt update \
-    && sudo rosdep init \
-    && . /opt/ros/${ROS_DISTRO}/setup.sh \
-    && rosdep update \
-    && rosdep install -i -y --from-path src \
-    && sudo rm -rf /var/lib/apt/lists/*'
-
 # Install fixuid to setup the correct uid in the files when starting the container
 COPY --chown=root:root docker/files/fixuid_config.yml /etc/fixuid/config.yml
 RUN /bin/bash -c '\
@@ -90,10 +52,7 @@ RUN /bin/bash -c '\
     && sudo sed -i "s/_GROUP_/$GROUP/" config.yml \
     && echo Done installing fixuid for $FIXUID_ARCH'
 
-#
 # Final setup of the workspace
-
-RUN echo "source /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash" >> /home/$USER/.bashrc
 
 RUN mkdir -p $USER_WS/persistence && chmod 777 $USER_WS/persistence
 

@@ -11,6 +11,7 @@ gosu
 gpg-agent
 locales
 lsb-release
+mc
 mercurial
 openssh-server
 python3
@@ -19,3 +20,4 @@ python3-setuptools
 software-properties-common
 sudo
 tmux
+wget
