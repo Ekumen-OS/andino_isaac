@@ -15,8 +15,6 @@ RUN apt-get update && \
 
 RUN rm /apt-requirements.txt
 
-USER $USER:$GROUP
-
 # Use default user that the Isaac sim 5.1 image uses
 ARG USER=isaac-sim
 ARG GROUP=isaac-sim
@@ -38,21 +36,7 @@ RUN usermod -u ${LOCAL_UID} -o isaac-sim \
 
 ENV USER_WS=/home/$USER/ws
 
-RUN mkdir -p $USER_WS/src
 WORKDIR $USER_WS
-
-# Install fixuid to setup the correct uid in the files when starting the container
-COPY --chown=root:root docker/files/fixuid_config.yml /etc/fixuid/config.yml
-RUN /bin/bash -c '\
-    ARCH=`uname -m` && if [ "$ARCH" == "aarch64" ]; then FIXUID_ARCH="arm64"; else FIXUID_ARCH="amd64"; fi \
-    && curl -SsL https://github.com/boxboat/fixuid/releases/download/v0.6.0/fixuid-0.6.0-linux-$FIXUID_ARCH.tar.gz | sudo tar -C /usr/local/bin -xzf - \
-    && sudo chmod 4755 /usr/local/bin/fixuid \
-    && cd /etc/fixuid \
-    && sudo sed -i "s/_USER_/$USER/" config.yml \
-    && sudo sed -i "s/_GROUP_/$GROUP/" config.yml \
-    && echo Done installing fixuid for $FIXUID_ARCH'
-
-# Final setup of the workspace
 
 RUN mkdir -p $USER_WS/persistence && chmod 777 $USER_WS/persistence
 
@@ -62,4 +46,4 @@ COPY --link docker/entrypoint.sh /
 ENV WITHIN_DEV=1
 
 CMD        ["/bin/bash"]
-ENTRYPOINT ["fixuid", "-q", "/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]

@@ -6,7 +6,7 @@ services:
       dockerfile: docker/Dockerfile
     container_name: andino_isaac
     network_mode: host
-    working_dir: /home/ubuntu/ws/
+    working_dir: /home/isaac-sim/ws/
     privileged: true
     environment:
       - LOCAL_UID=${LOCAL_UID}
@@ -33,7 +33,7 @@ services:
       - ./cache/isaac-sim/data:/root/.local/share/ov/data:rw
       - ./cache/isaac-sim/documents:/root/Documents:rw
       # Workspace
-      - ..:/home/ubuntu/ws/src/andino_isaac:rw
+      - ..:/home/isaac-sim/ws/src/andino_isaac:rw
     devices:
       - /dev/dri:/dev/dri
     runtime: nvidia
