@@ -56,10 +56,6 @@ ENV USER_WS=/home/$USER/ws
 RUN mkdir -p $USER_WS/src
 WORKDIR $USER_WS
 
-# Change isaac-sim's ownership
-RUN sudo mkdir -p /isaac-sim/kit/exts/omni.gpu_foundation/cache/nv_shadercache
-RUN sudo chown -R $USER:$GROUP /isaac-sim/kit/exts/omni.gpu_foundation/cache/nv_shadercache
-
 # Install the project dependencies
 COPY --from=cacher --chown=$USER:$GROUP /tmp/ws/ $USER_WS/
 RUN /bin/bash -c '\
