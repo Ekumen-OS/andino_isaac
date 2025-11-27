@@ -20,30 +20,16 @@ ENV ROS_DISTRO=humble
 
 ENV TERM=linux
 ENV DEBIAN_FRONTEND=noninteractive
-RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections
 
-RUN apt update \
-    && apt install --no-install-recommends -y \
-    apt-utils \
-    bash-completion \
-    build-essential \
-    curl \
-    debian-archive-keyring \
-    debian-keyring \
-    gnupg2 \
-    gpg-agent \
-    locales \
-    lsb-release \
-    mc \
-    openssh-server \
-    python3 \
-    python3-pip \
-    python3-setuptools \
-    software-properties-common \
-    sudo \
-    tmux \
-    wget \
-    && rm -rf /var/lib/apt/lists/*
+USER root
+
+# APT requirements
+COPY --link docker/requirements.txt /apt-requirements.txt
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y $(cat /apt-requirements.txt) && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN rm /apt-requirements.txt
 
 # Add the ROS 2 key and install a base ROS 2 installation
 RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
