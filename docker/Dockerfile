@@ -1,4 +1,4 @@
-ARG ISAAC_SIM_VERSION=4.5.0
+ARG ISAAC_SIM_VERSION=5.1.0
 
 FROM ros:humble-ros-base-jammy AS cacher
 
