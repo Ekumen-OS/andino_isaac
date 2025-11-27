@@ -16,4 +16,4 @@ if [[ ! -z "$1" ]]; then
     fi
 fi
 
-LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run ${BUILD} --rm andino_isaac --remove-orphans
+LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose run ${BUILD} --rm andino_isaac

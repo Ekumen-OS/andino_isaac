@@ -40,10 +40,7 @@ WORKDIR $USER_WS
 
 RUN mkdir -p $USER_WS/persistence && chmod 777 $USER_WS/persistence
 
-COPY --chown=$USER:$GROUP docker/files/bash_aliases /home/$USER/.bash_aliases
 COPY --link docker/entrypoint.sh /
-
-ENV WITHIN_DEV=1
 
 CMD        ["/bin/bash"]
 ENTRYPOINT ["/entrypoint.sh"]
