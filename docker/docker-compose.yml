@@ -24,14 +24,12 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - /tmp/.docker.xauth:/tmp/.docker.xauth
       # Various Isaac directories
-      - ./cache/isaac-sim/cache/kit:/isaac-sim/kit/cache:rw
-      - ./cache/isaac-sim/cache/ov:/root/.cache/ov:rw
-      - ./cache/isaac-sim/cache/pip:/root/.cache/pip:rw
-      - ./cache/isaac-sim/cache/glcache:/root/.cache/nvidia/GLCache:rw
-      - ./cache/isaac-sim/cache/computecache:/root/.nv/ComputeCache:rw
-      - ./cache/isaac-sim/logs:/root/.nvidia-omniverse/logs:rw
-      - ./cache/isaac-sim/data:/root/.local/share/ov/data:rw
-      - ./cache/isaac-sim/documents:/root/Documents:rw
+      - ./docker/isaac-sim/cache/main:/isaac-sim/.cache:rw \
+      - ./docker/isaac-sim/cache/computecache:/isaac-sim/.nv/ComputeCache:rw \
+      - ./docker/isaac-sim/logs:/isaac-sim/.nvidia-omniverse/logs:rw \
+      - ./docker/isaac-sim/config:/isaac-sim/.nvidia-omniverse/config:rw \
+      - ./docker/isaac-sim/data:/isaac-sim/.local/share/ov/data:rw \
+      - ./docker/isaac-sim/pkg:/isaac-sim/.local/share/ov/pkg:rw \
       # Workspace
       - ..:/home/isaac-sim/ws/src/andino_isaac:rw
     devices:
