@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
+set -e
 
-sudo chown "$USER" /isaac-sim/kit/cache -R
-sudo chown "$USER" /isaac-sim/kit/data -R
-sudo chown "$USER" /isaac-sim/kit/logs -R
+# Continue with the container startup
+exec gosu isaac-sim "$@"
 source /opt/ros/humble/setup.bash
 bash
