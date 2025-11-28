@@ -42,5 +42,9 @@ RUN mkdir -p $USER_WS/persistence && chmod 777 $USER_WS/persistence
 
 COPY --link docker/entrypoint.sh /
 
-CMD        ["/bin/bash"]
+ENV ROS_DISTRO=jazzy
+ENV RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib
+
 ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/isaac-sim/python.sh", "./src/andino_isaac/tools/isaac_launch_script.py", "--world_file", "./src/andino_isaac/isaac_worlds/plain_world.usda", "--robot_file", "./src/andino_isaac_description/andino.usd"]
