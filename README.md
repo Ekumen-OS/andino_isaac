@@ -43,3 +43,13 @@ ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
 [andino_isaac.webm](https://github.com/ekumenlabs/andino_isaac/assets/53065142/1802dc98-d8a0-4ee4-bbb5-df5590063b63)
+
+## :computer: Development
+
+For development in Isaac sim a devcontainer file is provided. This devcontainer enables Python analysis for Isaac sim code while inside the container, making it easier for the user to work with the API. To use it, open the repository directory with VSCode and click on "reopen in container" when prompted at the bottom right.
+
+This opens a VSCode window inside the Isaac sim container with the tools enabled. The container also has GUI and GPU capabilities and Isaac sim installed in the `/isaac-sim` directory. To open Isaac sim inside this devcontainer run:
+
+```sh
+./isaac-sim/isaac-sim.sh
+```

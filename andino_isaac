@@ -147,8 +147,8 @@ examples:
         # Get current user UID and GID
         local_uid = os.getuid()
         local_gid = os.getgid()
-        env_vars.append(f"LOCAL_UID={local_uid}")
-        env_vars.append(f"LOCAL_GID={local_gid}")
+        env_vars.append(f"UID={local_uid}")
+        env_vars.append(f"GID={local_gid}")
 
         run_cmd("xhost +local:docker")
 

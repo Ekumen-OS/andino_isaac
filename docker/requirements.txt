@@ -8,7 +8,6 @@ gdb
 git
 gnupg2
 gpg-agent
-gosu
 locales
 lsb-release
 mercurial
