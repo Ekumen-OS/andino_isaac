@@ -18,13 +18,13 @@ HOST_SIMULATION_ROBOTS_DIR = HOST_REPO_DIR / "andino_model"
 HOST_SIMULATION_SCENARIOS_DIR = HOST_REPO_DIR / "scenarios"
 
 CONTAINER_SIMULATION_ROBOT_DIR = Path(
-    "/home/isaac-sim/ws/andino_model"
+    "/workspaces/andino_isaac/andino_model"
 )
 CONTAINER_SIMULATION_SCENARIOS_DIR = Path(
-    "/home/isaac-sim/ws/scenarios"
+    "/workspaces/andino_isaac/scenarios"
 )
 CONTAINER_ISAAC_LAUNCH_SCRIPT = (
-    "/home/isaac-sim/ws/scripts/isaac_launch_script.py"
+    "/workspaces/andino_isaac/scripts/isaac_launch_script.py"
 )
 SIM_SERVICE_NAME = "andino_isaac"
 
@@ -118,7 +118,7 @@ examples:
     run_parser.add_argument(
         "--ros-domain-id",
         type=int,
-        required=True,
+        required=False,
         help="ROS_DOMAIN_ID env var to use",
     )
 

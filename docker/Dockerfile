@@ -41,7 +41,7 @@ ARG USER=isaac-sim
 
 USER ${USER}
 
-ENV USER_WS=/home/$USER/ws
+ENV USER_WS=/workspaces/andino_isaac
 WORKDIR $USER_WS
 
 COPY --link docker/entrypoint.sh /.entrypoint.sh
