@@ -15,8 +15,8 @@ RUN rm /apt-requirements.txt
 RUN locale-gen en_US en_US.UTF-8 && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 ENV LANG=en_US.UTF-8
 
-ARG UID=1000
-ARG GID=1000
+ARG UID
+ARG GID
 # Remove ubuntu user/group if they own HOST_UID/HOST_GID
 RUN if getent passwd ${UID:-1000} >/dev/null; then \
     USERNAME="$(getent passwd ${UID:-1000} | cut -d: -f1)"; \

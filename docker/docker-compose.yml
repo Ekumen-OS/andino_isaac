@@ -4,6 +4,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: andino_isaac
+      args:
+      - UID=${UID}
+      - GID=${GID}
     container_name: andino_isaac
     network_mode: host
     ipc: host
@@ -21,7 +24,7 @@ services:
       - ACCEPT_EULA=Y
       - PRIVACY_CONSENT=Y
       - OMNI_USER=admin
-      - OMNI_PASS=amin
+      - OMNI_PASS=admin
       - OMNI_SERVER=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1
       # ROS
       - ROS_LOCALHOST_ONLY=1
