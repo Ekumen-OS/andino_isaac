@@ -1,0 +1,44 @@
+{
+    "name": "andino_isaac_devcontainer",
+    "build": {
+        "dockerfile": "../docker/Dockerfile",
+        "image": "andino_isaac_devcontainer:latest",
+        "context": "..",
+        "args": {
+        "UID": "${localEnv:UID}",
+        "GID": "${localEnv:GID}"
+        }
+    },
+    "containerEnv": {
+        "DISPLAY": "${localEnv:DISPLAY}",
+        "NVIDIA_DRIVER_CAPABILITIES": "all",
+        "ACCEPT_EULA": "Y",
+        "PRIVACY_CONSENT": "Y"
+    },
+    "runArgs": [
+        "--gpus", "all",
+        "--network=host",
+        "--ipc=host",
+        "--rm",
+        "--privileged",
+        "--name", "andino_isaac_devcontainer"
+    ],
+    "mounts": [
+        "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
+        "source=isaac-cache,target=/root/.cache/ov",
+        "source=isaac-data,target=/root/.local/share/ov/data"
+    ],
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "nvidia.isaacsim-vscode-edition",
+                "shardulm94.trailing-spaces"
+            ]
+        }
+    },
+    "shutdownAction": "stopContainer",
+    "remoteUser": "isaac-sim",
+    "updateRemoteUserUID": true
+}

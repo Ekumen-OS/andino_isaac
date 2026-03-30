@@ -18,6 +18,3 @@ python3-setuptools
 software-properties-common
 sudo
 tmux
-ros-humble-desktop
-python3-rosdep
-python3-colcon-common-extensions

@@ -16,4 +16,17 @@ if [[ ! -z "$1" ]]; then
     fi
 fi
 
-docker compose run ${BUILD} --rm andino_isaac --remove-orphans
+# Create cache directories in host machine and give container user permissions
+echo "Creating Isaac sim cache directories"
+mkdir -p ~/docker/isaac-sim-andino/cache/main/ov
+mkdir -p ~/docker/isaac-sim-andino/cache/main/warp
+mkdir -p ~/docker/isaac-sim-andino/cache/computecache
+mkdir -p ~/docker/isaac-sim-andino/config
+mkdir -p ~/docker/isaac-sim-andino/data/documents
+mkdir -p ~/docker/isaac-sim-andino/data/Kit
+mkdir -p ~/docker/isaac-sim-andino/logs
+mkdir -p ~/docker/isaac-sim-andino/pkg
+
+UID=$(id -u) GID=$(id -g) docker compose run ${BUILD} --remove-orphans --rm andino_isaac
+
+sudo xhost -

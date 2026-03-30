@@ -1,7 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/bash
+set -e
 
-sudo chown "$USER" /isaac-sim/kit/cache -R
-sudo chown "$USER" /isaac-sim/kit/data -R
-sudo chown "$USER" /isaac-sim/kit/logs -R
-source /opt/ros/humble/setup.bash
-bash
+# Continue with the container startup
+bash /isaac-sim/python.sh "$ISAAC_LAUNCH_SCRIPT"

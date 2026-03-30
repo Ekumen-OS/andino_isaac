@@ -1,0 +1,777 @@
+#usda 1.0
+(
+    customLayerData = {
+        dictionary cameraSettings = {
+            dictionary Front = {
+                double3 position = (49999.99351283116, -9.276714674211206e-10, 0.12678740424990995)
+                double radius = 0.3505887985229492
+            }
+            dictionary Perspective = {
+                double3 position = (0.21420216001353698, -0.3615506859337098, 0.21689236508777254)
+                double3 target = (-10.186877254638535, 16.045574227582023, -4.981016389860839)
+            }
+            dictionary Right = {
+                double3 position = (0, -5, 0)
+                double radius = 5
+            }
+            dictionary Top = {
+                double3 position = (0, 0, 5)
+                double radius = 5
+            }
+            string boundCamera = "/OmniverseKit_Persp"
+        }
+        dictionary navmeshSettings = {
+            double agentHeight = 180
+            double agentRadius = 20
+            bool excludeRigidBodies = 1
+            int ver = 1
+            double voxelCeiling = 460
+        }
+        dictionary omni_layer = {
+            string authoring_layer = "./andino_base.usda"
+            dictionary locked = {
+            }
+            dictionary muteness = {
+            }
+        }
+        dictionary renderSettings = {
+            int "rtx:ecoMode:maxFramesWithoutChange" = 20
+            int "rtx:externalFrameCounter" = 347980
+            double "rtx:post:aa:sharpness" = 0.09999999776482582
+        }
+    }
+    defaultPrim = "andino"
+    endTimeCode = 0
+    metersPerUnit = 1
+    startTimeCode = -1
+    timeCodesPerSecond = 60
+    upAxis = "Z"
+)
+
+def Xform "andino" (
+    prepend apiSchemas = ["PhysicsArticulationRootAPI", "PhysxArticulationAPI"]
+)
+{
+    bool physxArticulation:articulationEnabled = 1
+    bool physxArticulation:enabledSelfCollisions = 0
+    int physxArticulation:solverPositionIterationCount = 32
+    int physxArticulation:solverVelocityIterationCount = 16
+    quatd xformOp:orient = (1, 0, 0, 0)
+    double3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (0, 0, 0.09275135397911072)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+    def Xform "base_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.00042833333, 0.0025366666, 0.0029616666)
+        float physics:mass = 0.8
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def PhysicsFixedJoint "base_footprint_joint"
+        {
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/base_footprint>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0, 0, -0.0501)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        def PhysicsFixedJoint "camera_joint"
+        {
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/camera_link>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0.085, 0, 0.025)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.70710677, 0, 0, 0.70710677)
+            quatf physics:localRot1 = (0.70710677, 0, 0, 0.70710677)
+        }
+
+        def PhysicsFixedJoint "caster_base_joint"
+        {
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/caster_base_link>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (-0.076, -0, 0.0045)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.70710677, 0, -0.70710677, 0)
+            quatf physics:localRot1 = (0.70710677, 0, -0.70710677, 0)
+        }
+
+        def PhysicsFixedJoint "left_motor_joint"
+        {
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/left_motor>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0.0015, 0.03775, -0.017)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.70710677, 0, 0, 0.70710677)
+            quatf physics:localRot1 = (0.70710677, 0, 0, 0.70710677)
+        }
+
+        def PhysicsRevoluteJoint "left_wheel_joint" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular"]
+            prepend apiSchemas = ["PhysxJointAPI", "PhysicsJointStateAPI:angular", "PhysicsDriveAPI:angular"]
+        )
+        {
+            float drive:angular:physics:damping = 100000
+            float drive:angular:physics:maxForce = 3.4028235e38
+            float drive:angular:physics:stiffness = 0
+            float drive:angular:physics:targetPosition = 0
+            float drive:angular:physics:targetVelocity = 0
+            uniform token drive:angular:physics:type = "force"
+            uniform token physics:axis = "X"
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/left_wheel>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0.0185, 0.0675, -0.017)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.70710677, 0, 0, 0.70710677)
+            quatf physics:localRot1 = (0.70710677, 0, 0, 0.70710677)
+            float physxJoint:jointFriction = 0
+            float physxJoint:maxJointVelocity = inf
+            float state:angular:physics:position = 0
+            float state:angular:physics:velocity = 0
+        }
+
+        def PhysicsFixedJoint "right_motor_joint"
+        {
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/right_motor>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0.0015, -0.03775, -0.017)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (-3.090862e-8, 0.70710677, 0.70710677, -3.090862e-8)
+            quatf physics:localRot1 = (0.70710677, 0, 0, 0.70710677)
+        }
+
+        def PhysicsRevoluteJoint "right_wheel_joint" (
+            prepend apiSchemas = ["PhysxJointAPI", "PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:damping = 100000
+            float drive:angular:physics:maxForce = 3.4028235e38
+            float drive:angular:physics:stiffness = 0
+            float drive:angular:physics:targetPosition = 0
+            float drive:angular:physics:targetVelocity = 0
+            uniform token drive:angular:physics:type = "force"
+            uniform token physics:axis = "X"
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/right_wheel>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0.0185, -0.0675, -0.017)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.70710677, 0, 0, 0.70710677)
+            quatf physics:localRot1 = (0.70710677, 0, 0, 0.70710677)
+            float physxJoint:jointFriction = 0
+            float physxJoint:maxJointVelocity = inf
+            float state:angular:physics:position = 0
+            float state:angular:physics:velocity = 0
+        }
+
+        def PhysicsFixedJoint "second_base_joint"
+        {
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/second_base_link>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        def PhysicsRevoluteJoint "caster_rotation_joint"
+        {
+            uniform token physics:axis = "X"
+            rel physics:body0 = </andino/base_link>
+            rel physics:body1 = </andino/caster_rotation_link>
+            float physics:breakForce = inf
+            float physics:breakTorque = inf
+            point3f physics:localPos0 = (-0.077, 0, 0.0045000017)
+            point3f physics:localPos1 = (0, 0, -1.5750196e-9)
+            quatf physics:localRot0 = (0.7071068, 0, -0.7071067, 0)
+            quatf physics:localRot1 = (0.70710677, 0, -0.70710677, 0)
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/base_link/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_blue> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            delete payload = [
+                @./meshes.usd@,
+                @./meshes.usd@</meshes/base_link/visuals>,
+                @./meshes.usd@</meshes/base_link/collisions>
+            ]
+            prepend payload = @./meshes.usd@</meshes/base_link/collisions>
+        )
+        {
+            uniform token purpose = "guide"
+        }
+    }
+
+    def Xform "base_footprint" (
+        delete apiSchemas = ["PhysicsMassAPI"]
+        prepend apiSchemas = ["PhysicsRigidBodyAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, -0.051)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+
+    def Xform "camera_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.0000066666666, 0.0000066666666, 0.0000066666666)
+        float physics:mass = 0.1
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.085, 0, 0.025)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Camera "Camera"
+        {
+            float2 clippingRange = (0.1, 10000000)
+            float focalLength = 24
+            float focusDistance = 400
+            bool omni:kit:cameraLock = 1
+            custom uniform vector3d omni:kit:centerOfInterest = (0, 0, -400)
+            token projection = "perspective"
+            token visibility = "invisible"
+            quatd xformOp:orient = (0.5000000000000002, 0.4999999999999999, -0.5, -0.4999999999999998)
+            double3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = [
+                @./meshes.usd@,
+                @./meshes.usd@</meshes/base_link/visuals>
+            ]
+            prepend payload = @./meshes.usd@</meshes/camera_link/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_blue> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+
+        def "collisions" (
+            delete payload = [
+                @./meshes.usd@,
+                @./meshes.usd@</meshes/base_link/visuals>,
+                @./meshes.usd@</meshes/base_link/collisions>
+            ]
+            prepend payload = @./meshes.usd@</meshes/camera_link/collisions>
+        )
+        {
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (0.19499999284744263, 0.07999999821186066, 0.004999999888241291)
+            double3 xformOp:translate = (0, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+    }
+
+    def Xform "caster_base_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, -0.02)
+        float3 physics:diagonalInertia = (0.0000053333333, 0.0000053333333, 0.0000053333333)
+        float physics:mass = 0.02
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (-0.076, 0, 0.0045)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def "collisions" (
+            delete payload = [
+                @./meshes.usd@,
+                @./meshes.usd@</meshes/base_link/visuals>,
+                @./meshes.usd@</meshes/base_link/collisions>,
+                @./meshes.usd@</meshes/camera_link/collisions>
+            ]
+            prepend payload = @./meshes.usd@</meshes/caster_base_link/collisions>
+        )
+        {
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (0.03999999910593033, 0.03999999910593033, 0.03999999910593033)
+            double3 xformOp:translate = (0, 0, -0.02)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = [
+                @./meshes.usd@,
+                @./meshes.usd@</meshes/base_link/visuals>,
+                @./meshes.usd@</meshes/camera_link/visuals>
+            ]
+            prepend payload = @./meshes.usd@</meshes/caster_base_link/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_silver> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0, 0, -0.02)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+    }
+
+    def Xform "caster_rotation_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, -0.02)
+        float3 physics:diagonalInertia = (0.0000053333333, 0.0000053333333, 0.0000053333333)
+        float physics:mass = 0.02
+        vector3f physics:velocity = (0, 0, 0)
+        float physxRigidBody:angularDamping = 0
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (-0.077, 0, 0.0045)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def PhysicsRevoluteJoint "caster_wheel_joint"
+        {
+            uniform token physics:axis = "Y"
+            rel physics:body0 = </andino/caster_rotation_link>
+            rel physics:body1 = </andino/caster_wheel_link>
+            float physics:breakForce = inf
+            float physics:breakTorque = inf
+            point3f physics:localPos0 = (-0.016, 0, -0.04)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/caster_rotation_link/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_silver> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/caster_rotation_link/collisions>
+        )
+        {
+        }
+    }
+
+    def Xform "caster_wheel_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI", "PhysxRigidBodyAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.000032291668, 0.000032291668, 0.00005625)
+        float physics:mass = 0.5
+        vector3f physics:velocity = (0, 0, 0)
+        float physxRigidBody:angularDamping = 0
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (-0.093, 0, -0.0355)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Material "PhysicsMaterial" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 0.01
+            float physics:staticFriction = 0.01
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/caster_wheel_link/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_black> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/caster_wheel_link/collisions>
+        )
+        {
+            rel material:binding:physics = </andino/caster_wheel_link/PhysicsMaterial> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+    }
+
+    def Xform "left_motor" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.0000071640834, 0.000043778666, 0.000045052082)
+        float physics:mass = 0.1
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.0015, 0.03775, -0.017)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/left_motor/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_light_blue> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/left_motor/collisions>
+        )
+        {
+            uniform token purpose = "guide"
+        }
+    }
+
+    def Xform "left_wheel" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.000010431547, 0.000010431547, 0.00001752976)
+        float physics:mass = 0.032
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.0185, 0.0675, -0.017)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Material "PhysicsMaterial" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 4
+            float physics:staticFriction = 5
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/left_wheel/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_dark_grey> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/left_wheel/collisions>
+        )
+        {
+            rel material:binding:physics = </andino/left_wheel/PhysicsMaterial> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+    }
+
+    def Xform "right_motor" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.0000071640834, 0.000043778666, 0.000045052082)
+        float physics:mass = 0.1
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (-0.001980947405421277, -6.135363800233408e-17, -0.9999980379217638, -6.13535178596925e-17)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.0015, -0.03775, -0.017)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/right_motor/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_light_blue> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/right_motor/collisions>
+        )
+        {
+        }
+    }
+
+    def Xform "right_wheel" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.000010431547, 0.000010431547, 0.00001752976)
+        float physics:mass = 0.032
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.0185, -0.0675, -0.017)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Material "PhysicsMaterial" (
+            prepend apiSchemas = ["PhysicsMaterialAPI"]
+        )
+        {
+            float physics:dynamicFriction = 4
+            float physics:staticFriction = 5
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/right_wheel/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_dark_grey> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/right_wheel/collisions>
+        )
+        {
+            rel material:binding:physics = </andino/right_wheel/PhysicsMaterial> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+    }
+
+    def Xform "second_base_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.00042833333, 0.0025366666, 0.0029616666)
+        float physics:mass = 0.8
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (1, 0, 0, 0)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def PhysicsFixedJoint "rplidar_laser_joint"
+        {
+            rel physics:body0 = </andino/second_base_link>
+            rel physics:body1 = </andino/rplidar_laser_link>
+            float physics:breakForce = 3.4028235e38
+            float physics:breakTorque = 3.4028235e38
+            point3f physics:localPos0 = (0.05, 0, 0.08)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (-0.7071068, 0, 0, 0.7071067)
+            quatf physics:localRot1 = (0.70710677, 0, 0, 0.70710677)
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/second_base_link/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_blue> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/second_base_link/collisions>
+        )
+        {
+            uniform token purpose = "guide"
+            double3 xformOp:translate = (0, 0, 0.05)
+        }
+    }
+
+    def Xform "rplidar_laser_link" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        vector3f physics:angularVelocity = (0, 0, 0)
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.0000064583332, 0.0000064583332, 0.00001125)
+        float physics:mass = 0.1
+        vector3f physics:velocity = (0, 0, 0)
+        quatd xformOp:orient = (6.123233995736766e-17, 0, 0, -1)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0.05, 0, 0.08)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def OmniLidar "Lidar" (
+            prepend references = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Sensors/NVIDIA/Example_Rotary_2D.usda@
+        )
+        {
+            bool omni:sensor:Core:skipDroppingInvalidPoints = 1
+            quatd xformOp:orient = (1, 0, 0, 0)
+            double3 xformOp:scale = (1, 1, 1)
+            double3 xformOp:translate = (0, 0, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+
+        def "visuals" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/rplidar_laser_link/visuals>
+        )
+        {
+            rel material:binding = </andino/Looks/material_black> (
+                bindMaterialAs = "weakerThanDescendants"
+            )
+        }
+
+        def "collisions" (
+            delete payload = @./meshes.usd@
+            prepend payload = @./meshes.usd@</meshes/rplidar_laser_link/collisions>
+        )
+        {
+        }
+    }
+
+    def "Looks" (
+        delete payload = @./meshes.usd@
+        prepend payload = @./meshes.usd@</meshes/Looks>
+    )
+    {
+    }
+}
+
+def "Render" (
+    hide_in_stage_window = true
+    no_delete = true
+)
+{
+    def "OmniverseKit"
+    {
+        def "HydraTextures" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            def RenderProduct "omni_kit_widget_viewport_ViewportTexture_0" (
+                prepend apiSchemas = ["OmniRtxSettingsCommonAdvancedAPI_1", "OmniRtxSettingsRtAdvancedAPI_1", "OmniRtxSettingsPtAdvancedAPI_1", "OmniRtxPostColorGradingAPI_1", "OmniRtxPostChromaticAberrationAPI_1", "OmniRtxPostBloomPhysicalAPI_1", "OmniRtxPostMatteObjectAPI_1", "OmniRtxPostCompositingAPI_1", "OmniRtxPostDofAPI_1", "OmniRtxPostMotionBlurAPI_1", "OmniRtxPostTvNoiseAPI_1", "OmniRtxPostTonemapIrayReinhardAPI_1", "OmniRtxPostDebugSettingsAPI_1", "OmniRtxDebugSettingsAPI_1"]
+                hide_in_stage_window = true
+                no_delete = true
+            )
+            {
+                rel camera = </OmniverseKit_Persp>
+                token omni:rtx:background:source:texture:textureMode = "repeatMirrored"
+                token omni:rtx:background:source:type = "domeLight"
+                bool omni:rtx:dlss:frameGeneration = 0
+                bool omni:rtx:material:db:nonVisualMaterialCSV:enabled = 0
+                bool omni:rtx:material:db:syncLoads = 1
+                float omni:rtx:post:aa:sharpness = 0.099999994
+                token omni:rtx:post:dlss:execMode = "performance"
+                bool omni:rtx:post:registeredCompositing:invertColorCorrection = 1
+                bool omni:rtx:post:registeredCompositing:invertToneMap = 1
+                bool omni:rtx:pt:lightcache:cached:dontResolveConflicts = 1
+                int omni:rtx:pt:maxSamplesPerLaunch = 2073600
+                int omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
+                color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
+                bool omni:rtx:rt:demoire = 0
+                int omni:rtx:rt:ecoMode:maxFramesWithoutChange = 20
+                bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
+                bool omni:rtx:scene:hydra:materialSyncLoads = 1
+                bool omni:rtx:scene:hydra:mdlMaterialWarmup = 1
+                uint omni:rtx:viewTile:limit = 4294967295
+                rel orderedVars = </Render/Vars/LdrColor>
+                custom bool overrideClipRange = 0
+                uniform int2 resolution = (1344, 720)
+            }
+        }
+    }
+
+    def RenderSettings "OmniverseGlobalRenderSettings" (
+        prepend apiSchemas = ["OmniRtxSettingsGlobalRtAdvancedAPI_1", "OmniRtxSettingsGlobalPtAdvancedAPI_1"]
+        no_delete = true
+    )
+    {
+        rel products = </Render/OmniverseKit/HydraTextures/omni_kit_widget_viewport_ViewportTexture_0>
+    }
+
+    def "Vars"
+    {
+        def RenderVar "LdrColor" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            uniform string sourceName = "LdrColor"
+        }
+    }
+}
+

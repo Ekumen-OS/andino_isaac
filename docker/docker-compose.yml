@@ -1,42 +1,60 @@
 services:
   andino_isaac:
-    user: ${USERID}:${GROUPID}
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      target: andino_isaac
+      args:
+      - UID=${UID}
+      - GID=${GID}
     container_name: andino_isaac
     network_mode: host
-    working_dir: /home/ubuntu/ws/
+    ipc: host
+    working_dir: /workspaces/andino_isaac
+    runtime: nvidia
     privileged: true
     environment:
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-10}
-      - DISPLAY
+      - UID=${UID}
+      - GID=${GID}
       - QT_X11_NO_MITSHM=1
       - XAUTHORITY=/tmp/.docker.xauth
+      - DISPLAY
+      # Nvidia related
       - OMNI_KIT_ACCEPT_EULA=Y
       - ACCEPT_EULA=Y
       - PRIVACY_CONSENT=Y
-      - NVIDIA_VISIBLE_DEVICES= all
-      - NVIDIA_DRIVER_CAPABILITIES= all
+      - OMNI_USER=admin
+      - OMNI_PASS=admin
+      - OMNI_SERVER=https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1
+      # ROS
+      - ROS_LOCALHOST_ONLY=1
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-10}
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/isaac-sim/exts/isaacsim.ros2.bridge/jazzy/lib
+      # Sim variables
+      - ISAAC_LAUNCH_SCRIPT=${ISAAC_LAUNCH_SCRIPT}
+      - PHYSICS_RATE=${PHYSICS_RATE}
+      - VIEWPORT=${VIEWPORT}
+      - RENDERING_RATE=${RENDERING_RATE}
+      - SCENARIO_PATH=${SCENARIO_PATH}
+      - ROBOT_PATH=${ROBOT_PATH}
+      - HEADLESS=${HEADLESS}
+      - START_STOPPED=${START_STOPPED}
+      - RUN_REAL_TIME=${RUN_REAL_TIME}
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /tmp/.docker.xauth:/tmp/.docker.xauth
-      # Various Isaac directories
-      - ~/docker/isaac-sim/cache:/isaac-sim/kit/cache:rw
-      - ~/docker/isaac-sim/cache/.cache:/root/.cache:rw
-      - ~/docker/isaac-sim/cache/computecache:/root/.nv/ComputeCache:rw
-      - ~/docker/isaac-sim/cache/data:/isaac-sim/kit/data:rw
-      - ~/docker/isaac-sim/kit/logs:/isaac-sim/kit/logs:rw
-      - ~/docker/isaac-sim/logs:/root/.nvidia-omniverse/logs:rw
-      - ~/docker/isaac-sim/data:/root/.local/share/ov/data:rw
-      - ~/docker/isaac-sim/documents:/root/Documents:rw
-      - ~/docker/isaac-sim/config:/root/.nvidia-omniverse/config:rw
-      - ~/docker/isaac-sim/shadercache:/isaac-sim/kit/exts/omni.gpu_foundation/cache/nv_shadercache:rw
+      - $HOME/.Xauthority:/isaac-sim/.Xauthority
+      # Isaac related
+      - ~/docker/isaac-sim-andino/cache/main:/isaac-sim/.cache:rw
+      - ~/docker/isaac-sim-andino/cache/computecache:/isaac-sim/.nv/ComputeCache:rw
+      - ~/docker/isaac-sim-andino/config:/isaac-sim/.nvidia-omniverse/config:rw
+      - ~/docker/isaac-sim-andino/data:/isaac-sim/.local/share/ov/data:rw
+      - ~/docker/isaac-sim-andino/logs:/isaac-sim/.nvidia-omniverse/logs:rw
+      - ~/docker/isaac-sim-andino/pkg:/isaac-sim/.local/share/ov/pkg:rw
       # Workspace
-      - ..:/home/ubuntu/ws/src/andino_isaac:rw
+      - ..:/workspaces/andino_isaac:rw
+    entrypoint: ["/workspaces/andino_isaac/docker/${ENTRYPOINT}" ]
     devices:
       - /dev/dri:/dev/dri
-    runtime: nvidia
     deploy:
       resources:
         reservations:
