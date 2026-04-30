@@ -139,17 +139,7 @@ over "andino"
                 custom uint64 outputs:context
             }
 
-            def OmniGraphNode "ReadSimTime"
-            {
-                custom uint64 inputs:referenceTimeDenominator
-                custom int64 inputs:referenceTimeNumerator
-                custom bool inputs:resetOnStop = 0
-                token node:type = "isaacsim.core.nodes.IsaacReadSimulationTime"
-                int node:typeVersion = 1
-                custom double outputs:simulationTime
-            }
-
-            def OmniGraphNode "SubscriberJointState"
+            def OmniGraphNode "SubscribeTwist"
             {
                 custom uint64 inputs:context
                 prepend uint64 inputs:context.connect = </andino/og/TwistSubscriber/Context.outputs:context>
@@ -163,36 +153,70 @@ over "andino"
                 custom string inputs:qosProfile
                 custom uint64 inputs:queueSize
                 custom string inputs:topicName = "/cmd_vel"
-                token node:type = "isaacsim.ros2.bridge.ROS2SubscribeJointState"
-                int node:typeVersion = 2
-                custom double[] outputs:effortCommand
+                token node:type = "isaacsim.ros2.bridge.ROS2SubscribeTwist"
+                int node:typeVersion = 1
+                custom vector3d outputs:angularVelocity
                 custom uint outputs:execOut (
                     customData = {
                         bool isExecution = 1
                     }
                 )
-                custom token[] outputs:jointNames
-                custom double[] outputs:positionCommand
-                custom double outputs:timeStamp
-                custom double[] outputs:velocityCommand
+                custom vector3d outputs:linearVelocity
             }
 
-            def OmniGraphNode "ArticulationController"
+            def OmniGraphNode "DifferentialController"
             {
-                custom double[] inputs:effortCommand
-                prepend double[] inputs:effortCommand.connect = </andino/og/TwistSubscriber/SubscriberJointState.outputs:effortCommand>
+                custom double inputs:angularVelocity
+                prepend double inputs:angularVelocity.connect = </andino/og/TwistSubscriber/BreakAngular.outputs:z>
                 custom uint inputs:execIn (
                     customData = {
                         bool isExecution = 1
                     }
                 )
-                prepend uint inputs:execIn.connect = </andino/og/TwistSubscriber/OnPlaybackTick.outputs:tick>
-                custom int[] inputs:jointIndices
-                custom token[] inputs:jointNames
-                prepend token[] inputs:jointNames.connect = </andino/og/TwistSubscriber/SubscriberJointState.outputs:jointNames>
-                custom double[] inputs:positionCommand
-                prepend double[] inputs:positionCommand.connect = </andino/og/TwistSubscriber/SubscriberJointState.outputs:positionCommand>
-                custom string inputs:robotPath
+                prepend uint inputs:execIn.connect = </andino/og/TwistSubscriber/SubscribeTwist.outputs:execOut>
+                custom double inputs:linearVelocity
+                prepend double inputs:linearVelocity.connect = </andino/og/TwistSubscriber/BreakLinear.outputs:x>
+                custom double inputs:maxAngularSpeed = 6.28
+                custom double inputs:maxLinearSpeed = 1.0
+                custom double inputs:maxWheelSpeed = 100.0
+                custom double inputs:wheelDistance = 0.165
+                custom double inputs:wheelRadius = 0.033
+                token node:type = "isaacsim.robot.wheeled_robots.DifferentialController"
+                int node:typeVersion = 1
+                custom double[] outputs:velocityCommand
+            }
+
+            def OmniGraphNode "BreakLinear"
+            {
+                custom vector3d inputs:tuple
+                prepend vector3d inputs:tuple.connect = </andino/og/TwistSubscriber/SubscribeTwist.outputs:linearVelocity>
+                token node:type = "omni.graph.nodes.BreakVector3"
+                int node:typeVersion = 1
+                custom double outputs:x
+                custom double outputs:y
+                custom double outputs:z
+            }
+
+            def OmniGraphNode "BreakAngular"
+            {
+                custom vector3d inputs:tuple
+                prepend vector3d inputs:tuple.connect = </andino/og/TwistSubscriber/SubscribeTwist.outputs:angularVelocity>
+                token node:type = "omni.graph.nodes.BreakVector3"
+                int node:typeVersion = 1
+                custom double outputs:x
+                custom double outputs:y
+                custom double outputs:z
+            }
+
+            def OmniGraphNode "ArticulationController"
+            {
+                custom uint inputs:execIn (
+                    customData = {
+                        bool isExecution = 1
+                    }
+                )
+                prepend uint inputs:execIn.connect = </andino/og/TwistSubscriber/SubscribeTwist.outputs:execOut>
+                custom token[] inputs:jointNames = ["left_wheel_joint", "right_wheel_joint"]
                 custom rel inputs:targetPrim = </andino> (
                     customData = {
                         dictionary omni = {
@@ -203,7 +227,7 @@ over "andino"
                     }
                 )
                 custom double[] inputs:velocityCommand
-                prepend double[] inputs:velocityCommand.connect = </andino/og/TwistSubscriber/SubscriberJointState.outputs:velocityCommand>
+                prepend double[] inputs:velocityCommand.connect = </andino/og/TwistSubscriber/DifferentialController.outputs:velocityCommand>
                 token node:type = "isaacsim.core.nodes.IsaacArticulationController"
                 int node:typeVersion = 1
             }
